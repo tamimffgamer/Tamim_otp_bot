@@ -100,21 +100,23 @@ def _sync_fetch_live_traffic_detailed():
 async def fetch_live_traffic_detailed():
     return await asyncio.to_thread(_sync_fetch_live_traffic_detailed)
 
-def _sync_check_mino_otp(target_phone):
+# Updated OTP check using console stream for accurate matching
+def _sync_check_mino_otp_from_console(target_phone, target_range=""):
     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
-    clean_target = ''.join(filter(str.isdigit, str(target_phone)))
     try:
-        res = requests.get(f"{BASE_API_URL}/check.php?number={clean_target}", headers=headers, timeout=2.0)
+        res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
         if res.status_code == 200:
-            res_json = res.json()
-            otps = res_json.get("data", {}).get("otps", []) or res_json.get("otps", []) or []
-            if isinstance(otps, list):
-                for otp_item in otps:
-                    if not isinstance(otp_item, dict): continue
-                    num_raw = str(otp_item.get("number", ""))
-                    msg = str(otp_item.get("message", ""))
+            hits = res.json().get("data", [])
+            if isinstance(hits, list):
+                clean_target = ''.join(filter(str.isdigit, str(target_phone)))
+                clean_range = ''.join(filter(str.isdigit, str(target_range)))
+                for hit in hits:
+                    if not isinstance(hit, dict): continue
+                    num_raw = str(hit.get("number") or hit.get("range", ""))
+                    msg = str(hit.get("message", ""))
                     clean_num = ''.join(filter(str.isdigit, num_raw))
-                    if clean_target in clean_num or clean_num in clean_target:
+                    
+                    if (clean_target and clean_target in clean_num) or (clean_range and clean_range in clean_num):
                         match = re.search(r'\b\d{4,8}\b', msg)
                         if match: return match.group(0)
                         elif msg: return msg
@@ -122,10 +124,10 @@ def _sync_check_mino_otp(target_phone):
         print(f"OTP Check Error: {e}")
     return None
 
-async def check_mino_otp(target_phone):
-    return await asyncio.to_thread(_sync_check_mino_otp, target_phone)
+async def check_mino_otp(target_phone, target_range=""):
+    return await asyncio.to_thread(_sync_check_mino_otp_from_console, target_phone, target_range)
 
-# Background Task to push panel console/OTP logs to Telegram Group automatically
+# Background Task to push panel console logs to Telegram Group automatically
 async def auto_forward_console_logs(application):
     await asyncio.sleep(5)
     while True:
@@ -142,7 +144,6 @@ async def auto_forward_console_logs(application):
                         service = hit.get("service", "SMS")
                         country = hit.get("country", "")
                         
-                        # Unique identifier for each log to prevent duplicate sending
                         log_id = f"{num}_{msg}"
                         if log_id not in SEEN_OTP_IDS:
                             SEEN_OTP_IDS.add(log_id)
@@ -151,11 +152,14 @@ async def auto_forward_console_logs(application):
                             
                             _, _, flag = get_country_info(num, country)
                             group_text = (
-                                f"🚨 <b>LIVE PANEL OTP SIGNAL</b> 🚨\n\n"
-                                f"🌐 <b>Service:</b> {service}\n"
-                                f"🌍 <b>Country:</b> {flag} {country}\n"
-                                f"📱 <b>Number/Range:</b> <code>{num}</code>\n"
-                                f"💬 <b>Message:</b>\n<code>{msg}</code>"
+                                f"🚨 <b>SMM NUMBER PANEL</b> 🚨\n"
+                                f"Admin\n"
+                                f"OTP Admin\n"
+                                f"📘 <b>{service} OTP RECEIVE</b>\n\n"
+                                f"🌍 <b>Country :</b> {country} ({flag})\n"
+                                f"🎯 <b>Range :</b> <code>{num}</code>\n"
+                                f"🗣 <b>Language :</b> English\n\n"
+                                f"✉ <b>Message :</b>\n<code>{msg}</code>"
                             )
                             try:
                                 await application.bot.send_message(chat_id=OTP_GROUP_CHAT_ID, text=group_text, parse_mode="HTML")
@@ -163,7 +167,7 @@ async def auto_forward_console_logs(application):
                                 print(f"Group Forward Error: {ex}")
         except Exception as e:
             print(f"Background Loop Error: {e}")
-        await asyncio.sleep(10)
+        await asyncio.sleep(8)
 
 def create_number_markup(numbers_list):
     keyboard = []
@@ -178,22 +182,18 @@ def create_number_markup(numbers_list):
     keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_home")])
     return InlineKeyboardMarkup(keyboard)
 
-async def poll_for_otp(chat_id, user_id, phone, context):
+async def poll_for_otp(chat_id, user_id, phone, user_range, context):
+    sent_otps = set()
     for _ in range(300): 
         await asyncio.sleep(1) 
         try:
-            status = await check_mino_otp(phone)
-            if status:
+            status = await check_mino_otp(phone, user_range)
+            if status and status not in sent_otps:
+                sent_otps.add(status)
                 current_bal = USER_BALANCES.get(user_id, 0.0)
                 USER_BALANCES[user_id] = current_bal + 0.00122
                 otp_message = f"🚨 <b>NEW OTP RECEIVED!</b> 🚨\n\n📱 <b>Number:</b> <code>{phone}</code>\n🔑 <b>OTP Code:</b> <code>{status}</code>\n💰 <b>Earned:</b> +$0.00122"
                 await context.bot.send_message(chat_id=chat_id, text=otp_message, parse_mode="HTML")
-                
-                # Also forward to group
-                try:
-                    await context.bot.send_message(chat_id=OTP_GROUP_CHAT_ID, text=otp_message, parse_mode="HTML")
-                except:
-                    pass
                 return
         except Exception as e:
             print(f"Polling Send Error: {e}")
@@ -257,7 +257,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         header_text = f"✅ <b>Number:</b> {flag} {country_name}"
         reply_markup = create_number_markup([p])
         await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
-        asyncio.create_task(poll_for_otp(update.effective_chat.id, user_id, p, context))
+        asyncio.create_task(poll_for_otp(update.effective_chat.id, user_id, p, user_range, context))
 
     elif "Set Range" in text:
         USER_STATES[user_id] = "WAITING_FOR_RANGE"
@@ -305,7 +305,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except: pass
         await start(update, context)
 
-    # Added handler for the Change button
     elif data == "change_number":
         await query.answer("🔄 Fetching a new number...")
         user_range = USER_RANGES.get(user_id, "88017XXX")
@@ -321,7 +320,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
         except:
             await query.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
-        asyncio.create_task(poll_for_otp(query.message.chat_id, user_id, p, context))
+        asyncio.create_task(poll_for_otp(query.message.chat_id, user_id, p, user_range, context))
 
     elif data.startswith("tr_svc_"):
         await query.answer()
@@ -398,7 +397,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             USER_BALANCES[user_id] = 0.0
 
 async def post_init(application):
-    # Start background job for auto-forwarding console stream logs to the target group
     asyncio.create_task(auto_forward_console_logs(application))
 
 if __name__ == '__main__':
