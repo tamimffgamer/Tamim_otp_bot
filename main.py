@@ -170,6 +170,7 @@ async def auto_forward_console_logs(application):
                     f"<code>{msg}</code>"
                 )
                 
+                # Ei button-ti nije je bot theke cholbe, oi same bot er link (e.g. t.me/tamim_otp_bot) generate korbe[span_5](start_span)[span_5](end_span)
                 markup = InlineKeyboardMarkup([
                     [InlineKeyboardButton("NUMBER BOT ↗", url=f"https://t.me/{application.bot.username}")]
                 ])
@@ -234,8 +235,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     support_text = (
         "💬 <b>সাপোর্ট সেন্টার</b>\n\n"
-        "যেকোনো সমস্যা বা প্রশ্ন থাকলে নিচের বাটনে ক্লিক করে সরাসরি আমাদের সাপোর্ট টিমের সাথে যোগাযোগ করুন।\n\n"
-        "⏰ দ্রুত সাড়া দেওয়া হবে ইনশাআল্লাহ।"
+        "যেকোনো সমস্যা বা প্রশ্ন থাকলে নিচের বাটনে ক্লিক করে সরাসরি আমাদের সাপোর্ট টিমের সাথে যোগাযোগ করুন。\n\n"
+        "⏰ দ্রুত সাড়া দেওয়া হবে ইনশাআল্লাহ。"
     )
     support_markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("📞 সাপোর্টে যোগাযোগ করুন", url=f"https://t.me/{SUPPORT_USERNAME}")]
