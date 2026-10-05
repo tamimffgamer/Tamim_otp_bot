@@ -18,6 +18,7 @@ USER_RANGES = {}
 USER_BALANCES = {}  
 USER_WITHDRAW_INFO = {} 
 SEEN_OTP_IDS = set()
+ACTIVE_USER_NUMBERS = {} # user_id -> {"phone": phone, "range": range, "chat_id": chat_id, "sent_otps": set()}
 
 def get_country_info(phone_number, api_country=""):
     clean_num = str(phone_number).replace("+", "").strip()
@@ -100,42 +101,7 @@ def _sync_fetch_live_traffic_detailed():
 async def fetch_live_traffic_detailed():
     return await asyncio.to_thread(_sync_fetch_live_traffic_detailed)
 
-# Improved OTP checker using Range and Prefix matching from console
-def _sync_check_mino_otp_from_console(target_phone, target_range=""):
-    headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
-    try:
-        res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
-        if res.status_code == 200:
-            hits = res.json().get("data", [])
-            if isinstance(hits, list):
-                clean_target = ''.join(filter(str.isdigit, str(target_phone)))
-                clean_range = ''.join(filter(str.isdigit, str(target_range).replace("X", "").replace("x", "")))
-                
-                for hit in hits:
-                    if not isinstance(hit, dict): continue
-                    num_raw = str(hit.get("number") or hit.get("range", ""))
-                    msg = str(hit.get("message", ""))
-                    clean_num = ''.join(filter(str.isdigit, num_raw))
-                    
-                    # Match by range prefix or exact phone number
-                    matched = False
-                    if clean_range and (clean_range in clean_num or clean_num.startswith(clean_range)):
-                        matched = True
-                    elif clean_target and (clean_target in clean_num or clean_num in clean_target):
-                        matched = True
-                        
-                    if matched:
-                        match = re.search(r'\b\d{4,8}\b', msg)
-                        if match: return match.group(0)
-                        elif msg: return msg
-    except Exception as e:
-        print(f"OTP Check Error: {e}")
-    return None
-
-async def check_mino_otp(target_phone, target_range=""):
-    return await asyncio.to_thread(_sync_check_mino_otp_from_console, target_phone, target_range)
-
-# Background Task to push panel console logs to Telegram Group automatically
+# Background Task to push panel console logs to Telegram Group and User Chat automatically
 async def auto_forward_console_logs(application):
     await asyncio.sleep(5)
     while True:
@@ -148,7 +114,7 @@ async def auto_forward_console_logs(application):
                     for hit in hits:
                         if not isinstance(hit, dict): continue
                         msg = hit.get("message", "")
-                        num = hit.get("number") or hit.get("range", "")
+                        num = str(hit.get("number") or hit.get("range", ""))
                         service = hit.get("service", "SMS")
                         country = hit.get("country", "")
                         
@@ -169,10 +135,53 @@ async def auto_forward_console_logs(application):
                                 f"🗣 <b>Language :</b> English\n\n"
                                 f"✉ <b>Message :</b>\n<code>{msg}</code>"
                             )
+                            # Send to Group
                             try:
                                 await application.bot.send_message(chat_id=OTP_GROUP_CHAT_ID, text=group_text, parse_mode="HTML")
                             except Exception as ex:
                                 print(f"Group Forward Error: {ex}")
+
+                            # Check and send to active users in personal chat with requested header & button
+                            clean_log_num = ''.join(filter(str.isdigit, num))
+                            for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
+                                u_phone = ''.join(filter(str.isdigit, str(u_info.get("phone", ""))))
+                                u_range = ''.join(filter(str.isdigit, str(u_info.get("range", "")).replace("X", "").replace("x", "")))
+                                
+                                matched = False
+                                if u_phone and u_phone in clean_log_num:
+                                    matched = True
+                                elif u_range and (u_range in clean_log_num or clean_log_num.startswith(u_range)):
+                                    matched = True
+                                    
+                                if matched:
+                                    match_otp = re.search(r'\b\d{4,8}\b', msg)
+                                    otp_code = match_otp.group(0) if match_otp else msg
+                                    
+                                    sent_set = u_info.setdefault("sent_otps", set())
+                                    if otp_code not in sent_set:
+                                        sent_set.add(otp_code)
+                                        current_bal = USER_BALANCES.get(user_id, 0.0)
+                                        USER_BALANCES[user_id] = current_bal + 0.00122
+                                        
+                                        personal_text = (
+                                            f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
+                                            f"🚨 <b>NEW OTP RECEIVED!</b> 🚨\n\n"
+                                            f"📱 <b>Number/Range:</b> <code>{num}</code>\n"
+                                            f"🔑 <b>OTP Code/Message:</b> <code>{otp_code}</code>\n"
+                                            f"💰 <b>Earned:</b> +$0.00122"
+                                        )
+                                        personal_markup = InlineKeyboardMarkup([
+                                            [InlineKeyboardButton("🔗 TAMIM OTP BOT", url="https://t.me/tamim_otp_bot")]
+                                        ])
+                                        try:
+                                            await application.bot.send_message(
+                                                chat_id=u_info["chat_id"], 
+                                                text=personal_text, 
+                                                reply_markup=personal_markup, 
+                                                parse_mode="HTML"
+                                            )
+                                        except Exception as per_ex:
+                                            print(f"Personal Send Error: {per_ex}")
         except Exception as e:
             print(f"Background Loop Error: {e}")
         await asyncio.sleep(8)
@@ -189,22 +198,6 @@ def create_number_markup(numbers_list):
     ])
     keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_home")])
     return InlineKeyboardMarkup(keyboard)
-
-async def poll_for_otp(chat_id, user_id, phone, user_range, context):
-    sent_otps = set()
-    for _ in range(300): 
-        await asyncio.sleep(1) 
-        try:
-            status = await check_mino_otp(phone, user_range)
-            if status and status not in sent_otps:
-                sent_otps.add(status)
-                current_bal = USER_BALANCES.get(user_id, 0.0)
-                USER_BALANCES[user_id] = current_bal + 0.00122
-                otp_message = f"🚨 <b>NEW OTP RECEIVED!</b> 🚨\n\n📱 <b>Number:</b> <code>{phone}</code>\n🔑 <b>OTP Code:</b> <code>{status}</code>\n💰 <b>Earned:</b> +$0.00122"
-                await context.bot.send_message(chat_id=chat_id, text=otp_message, parse_mode="HTML")
-                return
-        except Exception as e:
-            print(f"Polling Send Error: {e}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -261,11 +254,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ No stock for range <code>{user_range}</code>.", parse_mode="HTML")
             return
 
+        ACTIVE_USER_NUMBERS[user_id] = {
+            "phone": p,
+            "range": user_range,
+            "chat_id": update.effective_chat.id,
+            "sent_otps": set()
+        }
+
         country_name, _, flag = get_country_info(p)
         header_text = f"✅ <b>Number:</b> {flag} {country_name}"
         reply_markup = create_number_markup([p])
         await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
-        asyncio.create_task(poll_for_otp(update.effective_chat.id, user_id, p, user_range, context))
 
     elif "Set Range" in text:
         USER_STATES[user_id] = "WAITING_FOR_RANGE"
@@ -321,6 +320,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer(f"❌ No stock available for range {user_range}.", show_alert=True)
             return
 
+        ACTIVE_USER_NUMBERS[user_id] = {
+            "phone": p,
+            "range": user_range,
+            "chat_id": query.message.chat_id,
+            "sent_otps": set()
+        }
+
         country_name, _, flag = get_country_info(p)
         header_text = f"✅ <b>Number:</b> {flag} {country_name}"
         reply_markup = create_number_markup([p])
@@ -328,14 +334,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
         except:
             await query.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
-        asyncio.create_task(poll_for_otp(query.message.chat_id, user_id, p, user_range, context))
 
     elif data.startswith("tr_svc_"):
         await query.answer()
         sid = data.replace("tr_svc_", "")
         service_data, _ = await fetch_live_traffic_detailed()
         if sid not in service_data:
-            await query.answer("⚠️️ No data available!", show_alert=True)
+            await query.answer("⚠️ No data available!", show_alert=True)
             return
         
         countries = service_data[sid]
@@ -394,7 +399,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         USER_STATES[user_id] = "WAITING_FOR_BKASH"
         await query.message.reply_text("📲 Please send your bKash number:")
     elif data == "set_binance":
-        USER_STATES[user_id] = "WAIT_FOR_BINANCE"
+        USER_STATES[user_id] = "WAITING_FOR_BINANCE"
         await query.message.reply_text("🔴 Please send your Binance ID:")
     elif data == "withdraw_menu":
         user_bal = USER_BALANCES.get(user_id, 0.0)
