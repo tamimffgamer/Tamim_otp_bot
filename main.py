@@ -18,7 +18,7 @@ USER_RANGES = {}
 USER_BALANCES = {}  
 USER_WITHDRAW_INFO = {} 
 SEEN_OTP_IDS = set()
-ACTIVE_USER_NUMBERS = {} # user_id -> {"phone": phone, "range": range, "chat_id": chat_id, "sent_otps": set()}
+ACTIVE_USER_NUMBERS = {} 
 
 def get_country_info(phone_number, api_country=""):
     clean_num = str(phone_number).replace("+", "").strip()
@@ -60,7 +60,7 @@ def _sync_get_mino_real_number(target_range):
         print(f"MINO API Error: {e}")
     return None, None
 
-async def get_mino_real_number(target_range="88017XXX"):
+async def get_mino_real_number(target_range="23762XXX"):
     return await asyncio.to_thread(_sync_get_mino_real_number, target_range)
 
 def _sync_fetch_live_traffic_detailed():
@@ -101,7 +101,6 @@ def _sync_fetch_live_traffic_detailed():
 async def fetch_live_traffic_detailed():
     return await asyncio.to_thread(_sync_fetch_live_traffic_detailed)
 
-# Background Task to push panel console logs to Telegram Group and User Chat automatically
 async def auto_forward_console_logs(application):
     await asyncio.sleep(5)
     while True:
@@ -126,7 +125,6 @@ async def auto_forward_console_logs(application):
                             
                             _, _, flag = get_country_info(num, country)
                             
-                            # Group message formatting with your Bot Name & Link button
                             group_text = (
                                 f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
                                 f"📘 <b>{service} OTP RECEIVE</b>\n\n"
@@ -135,11 +133,11 @@ async def auto_forward_console_logs(application):
                                 f"🗣 <b>Language :</b> English\n\n"
                                 f"✉ <b>Message :</b>\n<code>{msg}</code>"
                             )
+                            # Custom 'NUMBER BOT ↗' inline button matching your requirement
                             group_markup = InlineKeyboardMarkup([
-                                [InlineKeyboardButton("🔗 @tamim_otp_bot", url="https://t.me/tamim_otp_bot")]
+                                [InlineKeyboardButton("NUMBER BOT ↗", url="https://t.me/tamim_otp_bot")]
                             ])
                             
-                            # Send to Group
                             try:
                                 await application.bot.send_message(
                                     chat_id=OTP_GROUP_CHAT_ID, 
@@ -150,7 +148,6 @@ async def auto_forward_console_logs(application):
                             except Exception as ex:
                                 print(f"Group Forward Error: {ex}")
 
-                            # Check and send to active users in personal chat
                             clean_log_num = ''.join(filter(str.isdigit, num))
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 u_phone = ''.join(filter(str.isdigit, str(u_info.get("phone", ""))))
@@ -180,7 +177,7 @@ async def auto_forward_console_logs(application):
                                             f"💰 <b>Earned:</b> +$0.00122"
                                         )
                                         personal_markup = InlineKeyboardMarkup([
-                                            [InlineKeyboardButton("🔗 @tamim_otp_bot", url="https://t.me/tamim_otp_bot")]
+                                            [InlineKeyboardButton("NUMBER BOT ↗", url="https://t.me/tamim_otp_bot")]
                                         ])
                                         try:
                                             await application.bot.send_message(
@@ -253,7 +250,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "Get API Number" in text:
         USER_STATES[user_id] = None
         wait_msg = await update.message.reply_text("⏳ Fetching real number from MINO panel...")
-        user_range = USER_RANGES.get(user_id, "88017XXX")
+        # Default range set to Cameroon (23762XXX) or user configured range
+        user_range = USER_RANGES.get(user_id, "23762XXX")
         
         p, oid = await get_mino_real_number(target_range=user_range)
         try: await wait_msg.delete()
@@ -277,7 +275,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif "Set Range" in text:
         USER_STATES[user_id] = "WAITING_FOR_RANGE"
-        await update.message.reply_text("🔴 Please send your target number range (e.g. 88017XXX):")
+        await update.message.reply_text("🔴 Please send your target number range (e.g. 23762XXX):")
 
     elif "Live Traffic" in text or "TRAFFIC" in text:
         USER_STATES[user_id] = None
@@ -323,7 +321,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "change_number":
         await query.answer("🔄 Fetching a new number...")
-        user_range = USER_RANGES.get(user_id, "88017XXX")
+        user_range = USER_RANGES.get(user_id, "23762XXX")
         p, oid = await get_mino_real_number(target_range=user_range)
         if not p:
             await query.answer(f"❌ No stock available for range {user_range}.", show_alert=True)
