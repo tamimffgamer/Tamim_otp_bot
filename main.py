@@ -55,9 +55,9 @@ def _sync_get_mino_real_number(target_range):
 async def get_mino_real_number(target_range="88017XXX"):
     return await asyncio.to_thread(_sync_get_mino_real_number, target_range)
 
-def _sync_fetch_live_traffic():
+def _sync_fetch_live_traffic_detailed():
     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
-    range_counts = {}
+    service_data = {}
     total_hits = 0
     try:
         res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=2.5)
@@ -73,20 +73,27 @@ def _sync_fetch_live_traffic():
                 for hit in hits:
                     if not isinstance(hit, dict): continue
                     r = hit.get("range") or hit.get("rid") or hit.get("number")
-                    sid = hit.get("sid", "FACEBOOK")
+                    sid = str(hit.get("sid", "FACEBOOK")).upper().strip()
                     if r:
                         clean_r = str(r).strip()
-                        if clean_r in range_counts:
-                            range_counts[clean_r]["count"] += 1
+                        c_name, c_code, c_flag = get_country_info(clean_r)
+                        
+                        if sid not in service_data:
+                            service_data[sid] = {}
+                        if c_code not in service_data[sid]:
+                            service_data[sid][c_code] = {"name": c_name, "flag": c_flag, "ranges": {}}
+                        
+                        ranges_dict = service_data[sid][c_code]["ranges"]
+                        if clean_r in ranges_dict:
+                            ranges_dict[clean_r] += 1
                         else:
-                            range_counts[clean_r] = {"sid": str(sid).upper(), "count": 1}
+                            ranges_dict[clean_r] = 1
     except Exception as e:
-        print(f"Traffic Error: {e}")
-    sorted_ranges = sorted(range_counts.items(), key=lambda x: x[1]["count"], reverse=True)
-    return sorted_ranges, total_hits
+        print(f"Detailed Traffic Error: {e}")
+    return service_data, total_hits
 
-async def fetch_live_traffic_from_panel():
-    return await asyncio.to_thread(_sync_fetch_live_traffic)
+async def fetch_live_traffic_detailed():
+    return await asyncio.to_thread(_sync_fetch_live_traffic_detailed)
 
 def _sync_check_mino_otp(target_phone):
     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
@@ -155,7 +162,7 @@ async def auto_forward_console_logs(application):
                 else:
                     masked_num = clean_num
 
-                country_name, country_code, flag = get_country_info(str(r))
+                _, country_code, flag = get_country_info(str(r))
                 
                 log_text = (
                     f"<b>MINO SMS PANEL</b>                     <b>Admin</b>\n"
@@ -170,7 +177,6 @@ async def auto_forward_console_logs(application):
                     f"<code>{msg}</code>"
                 )
                 
-                # Ei button-ti nije je bot theke cholbe, oi same bot er link (e.g. t.me/tamim_otp_bot) generate korbe[span_5](start_span)[span_5](end_span)
                 markup = InlineKeyboardMarkup([
                     [InlineKeyboardButton("NUMBER BOT ↗", url=f"https://t.me/{application.bot.username}")]
                 ])
@@ -305,21 +311,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         USER_STATES[user_id] = "WAITING_FOR_RANGE"
         await update.message.reply_text("🔴 Please send your target number range (e.g. 88017XXX):")
 
-    elif "Live Traffic" in text:
+    elif "Live Traffic" in text or "TRAFFIC" in text:
         USER_STATES[user_id] = None
-        sorted_ranges, total_hits = await fetch_live_traffic_from_panel()
-        traffic_lines = ["📊 <b>Live Traffic</b>\n", f"📋 <b>Total OTP:</b> {total_hits}", f"⏱ <b>Record:</b> Last 15 Minutes\n"]
-        if sorted_ranges:
-            top_r, top_info = sorted_ranges[0]
-            _, _, top_flag = get_country_info(top_r)
-            traffic_lines.append(f"👑 <b>Top Range:</b> {top_flag} <code>{top_r}</code> - {top_info['sid']}")
-            traffic_lines.append("\n📥 <b>Range List</b>")
-            for r, info in sorted_ranges:
-                _, _, flag = get_country_info(r)
-                traffic_lines.append(f"• {flag} <code>{r}</code> - {info['sid']} - {info['count']}")
-        else:
-            traffic_lines.append("⚠️ No active ranges found right now.")
-        await update.message.reply_text("\n".join(traffic_lines), parse_mode="HTML")
+        service_data, total_hits = await fetch_live_traffic_detailed()
+        
+        if not service_data:
+            await update.message.reply_text("⚠️ No active traffic found right now.", parse_mode="HTML")
+            return
+
+        keyboard = []
+        for sid in sorted(service_data.keys()):
+            total_sid_otp = sum(sum(c_info["ranges"].values()) for c_info in service_data[sid].values())
+            keyboard.append([InlineKeyboardButton(f"👀 Explore {sid.title()} Range ({total_sid_otp})", callback_data=f"tr_svc_{sid}")])
+        
+        keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data="tr_refresh"), InlineKeyboardButton("❌ Close", callback_data="tr_close")])
+        markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(f"📊 <b>Live Traffic Panel</b>\n📋 <b>Total OTP:</b> {total_hits}\nSelect a service below:", reply_markup=markup, parse_mode="HTML")
 
     elif "Balance" in text:
         USER_STATES[user_id] = None
@@ -346,50 +354,109 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer("🔄 Changing number...") 
+    data = query.data
     user_id = query.from_user.id
 
-    if query.data == "change_number":
+    if data == "change_number":
+        await query.answer("🔄 Changing number...")
         user_range = USER_RANGES.get(user_id, "88017XXX")
-        
         results = await asyncio.gather(
             get_mino_real_number(target_range=user_range),
             get_mino_real_number(target_range=user_range)
         )
-        
-        numbers = []
-        for p, oid in results:
-            if p and p not in numbers:
-                numbers.append(p)
-
-        if not numbers: 
-            return
-
+        numbers = [p for p, _ in results if p]
+        if not numbers: return
         country_name, _, flag = get_country_info(numbers[0])
         header_text = f"✅ <b>Number:</b> {flag} {country_name}"
         reply_markup = create_number_markup(numbers)
         try:
             await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
-        except Exception: 
-            pass
-
+        except Exception: pass
         for p in numbers:
             asyncio.create_task(poll_for_otp(query.message.chat_id, user_id, p, context))
 
-    elif query.data == "back_home":
+    elif data == "back_home":
         try: await query.message.delete()
         except Exception: pass
         await start(update, context)
+
+    elif data.startswith("tr_svc_"):
+        await query.answer()
+        sid = data.replace("tr_svc_", "")
+        service_data, _ = await fetch_live_traffic_detailed()
+        if sid not in service_data:
+            await query.answer("⚠️ No data available!", show_alert=True)
+            return
         
-    elif query.data == "set_bkash":
+        countries = service_data[sid]
+        keyboard = []
+        for c_code, c_info in sorted(countries.items(), key=lambda x: sum(x[1]["ranges"].values()), reverse=True):
+            c_otp_count = sum(c_info["ranges"].values())
+            keyboard.append([InlineKeyboardButton(f"{c_info['flag']} {c_info['name']} ({c_code}) - {c_otp_count} OTP", callback_data=f"tr_cnt_{sid}_{c_code}")])
+        
+        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="tr_main")])
+        markup = InlineKeyboardMarkup(keyboard)
+        try:
+            await query.edit_message_text(f"👑 <b>Explore Service:</b> 🌐 {sid}\n\nSelect a country to view available ranges:", reply_markup=markup, parse_mode="HTML")
+        except Exception: pass
+
+    elif data.startswith("tr_cnt_"):
+        await query.answer()
+        parts = data.split("_")
+        sid = parts[2]
+        c_code = parts[3]
+        
+        service_data, _ = await fetch_live_traffic_detailed()
+        if sid not in service_data or c_code not in service_data[sid]:
+            await query.answer("⚠️ Data expired!", show_alert=True)
+            return
+        
+        c_data = service_data[sid][c_code]
+        ranges = c_data["ranges"]
+        
+        keyboard = []
+        row = []
+        sorted_ranges = sorted(ranges.items(), key=lambda x: x[1], reverse=True)
+        for r_num, count in sorted_ranges:
+            row.append(InlineKeyboardButton(f"🎛 {r_num} ({count})", copy_text=CopyTextButton(text=r_num)))
+            if len(row) == 2:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+            
+        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data=f"tr_svc_{sid}")])
+        markup = InlineKeyboardMarkup(keyboard)
+        try:
+            await query.edit_message_text(f"👑 <b>Ranges for</b> 🌐 {sid} - {c_data['flag']} <b>{c_code}</b>\n\nClick on any range to copy it.", reply_markup=markup, parse_mode="HTML")
+        except Exception: pass
+
+    elif data == "tr_main" or data == "tr_refresh":
+        await query.answer("🔄 Refreshed!")
+        service_data, total_hits = await fetch_live_traffic_detailed()
+        keyboard = []
+        for sid in sorted(service_data.keys()):
+            total_sid_otp = sum(sum(c_info["ranges"].values()) for c_info in service_data[sid].values())
+            keyboard.append([InlineKeyboardButton(f"👀 Explore {sid.title()} Range ({total_sid_otp})", callback_data=f"tr_svc_{sid}")])
+        keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data="tr_refresh"), InlineKeyboardButton("❌ Close", callback_data="tr_close")])
+        markup = InlineKeyboardMarkup(keyboard)
+        try:
+            await query.edit_message_text(f"📊 <b>Live Traffic Panel</b>\n📋 <b>Total OTP:</b> {total_hits}\nSelect a service below:", reply_markup=markup, parse_mode="HTML")
+        except Exception: pass
+
+    elif data == "tr_close":
+        try: await query.message.delete()
+        except Exception: pass
+
+    elif data == "set_bkash":
         USER_STATES[user_id] = "WAITING_FOR_BKASH"
         await query.message.reply_text("📲 Please send your bKash personal/agent number:")
         
-    elif query.data == "set_binance":
+    elif data == "set_binance":
         USER_STATES[user_id] = "WAITING_FOR_BINANCE"
         await query.message.reply_text("🔴 Please send your Binance Pay ID:")
         
-    elif query.data == "withdraw_menu":
+    elif data == "withdraw_menu":
         user_bal = USER_BALANCES.get(user_id, 0.0)
         if user_bal < 1.0:
             await query.message.reply_text(f"❌ <b>Insufficient Balance!</b>\n\nYour balance is ${user_bal:.5f}. Minimum withdraw limit is <b>$1.00</b>.", parse_mode="HTML")
