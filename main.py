@@ -63,12 +63,16 @@ def _sync_fetch_live_traffic():
         res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=2.5)
         if res.status_code == 200:
             res_json = res.json()
-            hits = res_json.get("data", {}).get("hits", []) or res_json.get("data", []) or res_json.get("hits", [])
+            hits = (
+                res_json.get("data", {}).get("hits", []) or 
+                res_json.get("hits", []) or 
+                res_json.get("data", []) or []
+            )
             if isinstance(hits, list):
                 total_hits = len(hits)
                 for hit in hits:
                     if not isinstance(hit, dict): continue
-                    r = hit.get("range") or hit.get("rid")
+                    r = hit.get("range") or hit.get("rid") or hit.get("number")
                     sid = hit.get("sid", "FACEBOOK")
                     if r:
                         clean_r = str(r).strip()
