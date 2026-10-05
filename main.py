@@ -24,7 +24,7 @@ from telegram.ext import (
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 # Render/Redar/GitHub environment variable-এ নতুন MINO API key দিন
-MINO_API_KEY = os.environ.get("MINO_API_KEY")
+MINO_API_KEY = os.environ.get("mino_live_a5db48f1d607f390b0d3bd1fccfc1d17")
 
 MINO_BASE_URL = "https://minosms.com"
 
