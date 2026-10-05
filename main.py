@@ -18,7 +18,7 @@ USER_RANGES = {}
 USER_BALANCES = {}  
 USER_WITHDRAW_INFO = {} 
 SEEN_OTP_IDS = set()
-ACTIVE_USER_NUMBERS = {} # user_id -> {"phone": exact_phone, "chat_id": chat_id, "sent_otps": set()}
+ACTIVE_USER_NUMBERS = {} 
 
 def get_country_info(phone_number, api_country=""):
     clean_num = str(phone_number).replace("+", "").strip()
@@ -137,7 +137,6 @@ async def auto_forward_console_logs(application):
                                 [InlineKeyboardButton("NUMBER BOT ↗", url="https://t.me/tamim_otp_bot")]
                             ])
                             
-                            # Send to Group
                             try:
                                 await application.bot.send_message(
                                     chat_id=OTP_GROUP_CHAT_ID, 
@@ -148,13 +147,17 @@ async def auto_forward_console_logs(application):
                             except Exception as ex:
                                 print(f"Group Forward Error: {ex}")
 
-                            # STRICT FIX: Send to personal chat ONLY if the log number EXACTLY matches the specific active number requested by that user
                             clean_log_num = ''.join(filter(str.isdigit, num))
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 u_phone = ''.join(filter(str.isdigit, str(u_info.get("phone", ""))))
                                 
-                                # Match only if exact phone number matches the log number
-                                if u_phone and u_phone == clean_log_num:
+                                # Flexible matching: Checks if log number contains user phone or vice-versa, or matches prefix
+                                matched = False
+                                if u_phone and clean_log_num:
+                                    if u_phone in clean_log_num or clean_log_num in u_phone or clean_log_num.startswith(u_phone[:8]):
+                                        matched = True
+                                        
+                                if matched:
                                     match_otp = re.search(r'\b\d{4,8}\b', msg)
                                     otp_code = match_otp.group(0) if match_otp else msg
                                     
