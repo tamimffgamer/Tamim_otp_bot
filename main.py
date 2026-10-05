@@ -125,23 +125,32 @@ async def auto_forward_console_logs(application):
                                 SEEN_OTP_IDS.pop()
                             
                             _, _, flag = get_country_info(num, country)
+                            
+                            # Group message formatting with your Bot Name & Link button
                             group_text = (
-                                f"🚨 <b>SMM NUMBER PANEL</b> 🚨\n"
-                                f"Admin\n"
-                                f"OTP Admin\n"
+                                f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
                                 f"📘 <b>{service} OTP RECEIVE</b>\n\n"
                                 f"🌍 <b>Country :</b> {country} ({flag})\n"
                                 f"🎯 <b>Range :</b> <code>{num}</code>\n"
                                 f"🗣 <b>Language :</b> English\n\n"
                                 f"✉ <b>Message :</b>\n<code>{msg}</code>"
                             )
+                            group_markup = InlineKeyboardMarkup([
+                                [InlineKeyboardButton("🔗 @tamim_otp_bot", url="https://t.me/tamim_otp_bot")]
+                            ])
+                            
                             # Send to Group
                             try:
-                                await application.bot.send_message(chat_id=OTP_GROUP_CHAT_ID, text=group_text, parse_mode="HTML")
+                                await application.bot.send_message(
+                                    chat_id=OTP_GROUP_CHAT_ID, 
+                                    text=group_text, 
+                                    reply_markup=group_markup, 
+                                    parse_mode="HTML"
+                                )
                             except Exception as ex:
                                 print(f"Group Forward Error: {ex}")
 
-                            # Check and send to active users in personal chat with requested header & button
+                            # Check and send to active users in personal chat
                             clean_log_num = ''.join(filter(str.isdigit, num))
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 u_phone = ''.join(filter(str.isdigit, str(u_info.get("phone", ""))))
@@ -171,7 +180,7 @@ async def auto_forward_console_logs(application):
                                             f"💰 <b>Earned:</b> +$0.00122"
                                         )
                                         personal_markup = InlineKeyboardMarkup([
-                                            [InlineKeyboardButton("🔗 TAMIM OTP BOT", url="https://t.me/tamim_otp_bot")]
+                                            [InlineKeyboardButton("🔗 @tamim_otp_bot", url="https://t.me/tamim_otp_bot")]
                                         ])
                                         try:
                                             await application.bot.send_message(
