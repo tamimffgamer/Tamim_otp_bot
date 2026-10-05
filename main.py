@@ -1,38 +1,37 @@
 import os
 import asyncio
 import requests
+
 from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
-    CopyTextButton
+    CopyTextButton,
 )
+
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
+    ContextTypes,
     filters,
-    ContextTypes
 )
 
+
 # =========================================================
-# CONFIG
+# CONFIGURATION
 # =========================================================
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-
-# Render/Redar/GitHub environment variable-এ নতুন MINO API key দিন
-MINO_API_KEY = os.environ.get("mino_live_a5db48f1d607f390b0d3bd1fccfc1d17")
+MINO_API_KEY = os.environ.get("MINO_API_KEY")
 
 MINO_BASE_URL = "https://minosms.com"
 
-# আপনার support
 SUPPORT_USERNAME = "tmtamimmia"
-
-# আপনার OTP group link
 OTP_GROUP_USERNAME = "smm_otp_grup"
+
 
 # =========================================================
 # USER DATA
@@ -43,73 +42,71 @@ USER_RANGES = {}
 
 
 # =========================================================
-# COUNTRY
+# COUNTRY INFORMATION
 # =========================================================
 
 def get_country_info(phone_number):
-    clean_num = str(phone_number).replace("+", "").strip()
 
-    if clean_num.startswith("237"):
-        return "Cameroon", "CM", "🇨🇲"
+    number = str(phone_number).replace("+", "").strip()
 
-    elif clean_num.startswith("225"):
-        return "Ivory Coast", "CI", "🇨🇮"
+    countries = [
+        ("237", "Cameroon", "CM", "🇨🇲"),
+        ("225", "Ivory Coast", "CI", "🇨🇮"),
+        ("228", "Togo", "TG", "🇹🇬"),
+        ("229", "Benin", "BJ", "🇧🇯"),
+        ("255", "Tanzania", "TZ", "🇹🇿"),
+        ("266", "Lesotho", "LS", "🇱🇸"),
+        ("380", "Ukraine", "UA", "🇺🇦"),
+        ("224", "Guinea", "GN", "🇬🇳"),
+        ("996", "Kyrgyzstan", "KG", "🇰🇬"),
+        ("43", "Austria", "AT", "🇦🇹"),
+        ("880", "Bangladesh", "BD", "🇧🇩"),
+    ]
 
-    elif clean_num.startswith("228"):
-        return "Togo", "TG", "🇹🇬"
+    for prefix, name, code, flag in countries:
 
-    elif clean_num.startswith("229"):
-        return "Benin", "BJ", "🇧🇯"
+        if number.startswith(prefix):
+            return name, code, flag
 
-    elif clean_num.startswith("255"):
-        return "Tanzania", "TZ", "🇹🇿"
-
-    elif clean_num.startswith("266"):
-        return "Lesotho", "LS", "🇱🇸"
-
-    elif clean_num.startswith("380"):
-        return "Ukraine", "UA", "🇺🇦"
-
-    elif clean_num.startswith("224"):
-        return "Guinea", "GN", "🇬🇳"
-
-    elif clean_num.startswith("996"):
-        return "Kyrgyzstan", "KG", "🇰🇬"
-
-    elif clean_num.startswith("43"):
-        return "Austria", "AT", "🇦🇹"
-
-    else:
-        return "Unknown", "XX", "🌐"
+    return "Unknown", "XX", "🌐"
 
 
 # =========================================================
-# MINO SMS - GET NUMBER
+# MINO SMS API
 # =========================================================
 
-def _sync_get_mino_number(target_range):
+def sync_get_number(target_range):
 
     if not MINO_API_KEY:
-        print("MINO_API_KEY is missing")
+
+        print("ERROR: MINO_API_KEY is missing")
+
         return None, None
+
+    if not target_range:
+
+        return None, None
+
+    # -----------------------------------------------------
+    # MINO documentation:
+    #
+    # Header:
+    # mauthapi: YOUR_API_KEY
+    #
+    # Payload:
+    # {"rid": "88017XXX"}
+    # -----------------------------------------------------
 
     headers = {
         "mauthapi": MINO_API_KEY,
         "Accept": "application/json",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
-    # যেমন 88017XXX -> 88017
-    clean_rid = (
-        str(target_range)
-        .upper()
-        .replace("XXX", "")
-        .replace("X", "")
-        .strip()
-    )
+    rid = str(target_range).strip().upper()
 
     payload = {
-        "rid": clean_rid
+        "rid": rid
     }
 
     try:
@@ -118,48 +115,79 @@ def _sync_get_mino_number(target_range):
             f"{MINO_BASE_URL}/getnumber.php",
             headers=headers,
             json=payload,
-            timeout=10
+            timeout=15,
         )
 
-        print("MINO STATUS:", response.status_code)
+        print("MINO HTTP:", response.status_code)
         print("MINO RESPONSE:", response.text)
 
         if response.status_code != 200:
+
             return None, None
 
-        data = response.json()
+        try:
+            data = response.json()
 
-        # API response অনুযায়ী সম্ভাব্য number field
+        except ValueError:
+
+            print("MINO returned non-JSON response")
+
+            return None, None
+
+        # -------------------------------------------------
+        # Different possible response structures
+        # -------------------------------------------------
+
+        root = data if isinstance(data, dict) else {}
+
+        nested = root.get("data")
+
+        if not isinstance(nested, dict):
+            nested = {}
+
         number = (
-            data.get("number")
-            or data.get("phone")
-            or data.get("full_number")
-            or data.get("data", {}).get("number")
-            or data.get("data", {}).get("phone")
-            or data.get("data", {}).get("full_number")
+            root.get("number")
+            or root.get("phone")
+            or root.get("full_number")
+            or root.get("national_number")
+
+            or nested.get("number")
+            or nested.get("phone")
+            or nested.get("full_number")
+            or nested.get("national_number")
         )
 
-        # সম্ভাব্য order/id
         order_id = (
-            data.get("id")
-            or data.get("order_id")
-            or data.get("booking_id")
-            or data.get("data", {}).get("id")
-            or data.get("data", {}).get("order_id")
+            root.get("id")
+            or root.get("order_id")
+            or root.get("booking_id")
+
+            or nested.get("id")
+            or nested.get("order_id")
+            or nested.get("booking_id")
         )
 
         if number:
+
             return str(number), str(order_id or "")
 
-    except Exception as e:
-        print("MINO API ERROR:", e)
+        print("Number field was not found in MINO response")
+
+    except requests.RequestException as error:
+
+        print("MINO REQUEST ERROR:", error)
+
+    except Exception as error:
+
+        print("MINO ERROR:", error)
 
     return None, None
 
 
-async def get_mino_number(target_range):
+async def get_number(target_range):
+
     return await asyncio.to_thread(
-        _sync_get_mino_number,
+        sync_get_number,
         target_range
     )
 
@@ -168,7 +196,7 @@ async def get_mino_number(target_range):
 # NUMBER BUTTONS
 # =========================================================
 
-def create_number_markup(numbers):
+def create_number_markup(numbers, target_range):
 
     keyboard = []
 
@@ -179,21 +207,29 @@ def create_number_markup(numbers):
         keyboard.append([
             InlineKeyboardButton(
                 text=f"{flag} {number}",
-                copy_text=CopyTextButton(text=str(number))
+                copy_text=CopyTextButton(
+                    text=str(number)
+                )
             )
         ])
 
+    # Change Number
     keyboard.append([
-        InlineKeyboardButton(
-            "🔔 OTP GROUP",
-            url=f"https://t.me/{OTP_GROUP_USERNAME}"
-        ),
         InlineKeyboardButton(
             "🔄 Change Number",
             callback_data="change_number"
         )
     ])
 
+    # OTP Group
+    keyboard.append([
+        InlineKeyboardButton(
+            "📣 OTP Group",
+            url=f"https://t.me/{OTP_GROUP_USERNAME}"
+        )
+    ])
+
+    # Support
     keyboard.append([
         InlineKeyboardButton(
             "👨‍💻 Support",
@@ -201,6 +237,7 @@ def create_number_markup(numbers):
         )
     ])
 
+    # Back
     keyboard.append([
         InlineKeyboardButton(
             "🔙 Back",
@@ -212,25 +249,251 @@ def create_number_markup(numbers):
 
 
 # =========================================================
-# START
+# HOME MENU
 # =========================================================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def home_keyboard():
 
     keyboard = [
-        ["📞 Get API Number", "⚙ Set Range"],
-        ["📣 OTP Group", "👨‍💻 Support"]
+        [
+            "📞 Get API Number",
+            "⚙ Set Range"
+        ],
+        [
+            "📣 OTP Group",
+            "👨‍💻 Support"
+        ],
     ]
 
-    markup = ReplyKeyboardMarkup(
+    return ReplyKeyboardMarkup(
         keyboard,
         resize_keyboard=True
     )
 
+
+# =========================================================
+# START
+# =========================================================
+
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     await update.message.reply_text(
-        "🤖 Welcome to Number Bot!\n\n"
-        "Please select an option:",
-        reply_markup=markup
+        "🤖 <b>Welcome to Number Bot!</b>\n\n"
+        "নিচের Menu থেকে একটি option নির্বাচন করুন।",
+        reply_markup=home_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+# =========================================================
+# GET NUMBER
+# =========================================================
+
+async def handle_get_number(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    user_id = update.effective_user.id
+
+    target_range = USER_RANGES.get(
+        user_id,
+        "22896"
+    )
+
+    wait_message = await update.message.reply_text(
+        "⏳ <b>Getting number...</b>\n\n"
+        f"⚙️ Range: <code>{target_range}</code>",
+        parse_mode="HTML",
+    )
+
+    numbers = []
+
+    # দুইবার চেষ্টা করবে
+    for _ in range(2):
+
+        phone, order_id = await get_number(
+            target_range
+        )
+
+        if phone and phone not in numbers:
+
+            numbers.append(phone)
+
+    try:
+
+        await wait_message.delete()
+
+    except Exception:
+
+        pass
+
+    # -----------------------------------------------------
+    # No number
+    # -----------------------------------------------------
+
+    if not numbers:
+
+        await update.message.reply_text(
+            "❌ <b>No Number Available</b>\n\n"
+            f"⚙️ Range: <code>{target_range}</code>\n\n"
+            "এই Range-এ বর্তমানে number পাওয়া যায়নি।",
+            parse_mode="HTML",
+        )
+
+        return
+
+    # -----------------------------------------------------
+    # Country
+    # -----------------------------------------------------
+
+    country_name, country_code, flag = get_country_info(
+        numbers[0]
+    )
+
+    # -----------------------------------------------------
+    # Header
+    # -----------------------------------------------------
+
+    text = (
+        f"🌐 <b>Country:</b> "
+        f"{flag} {country_name}\n\n"
+
+        f"⚙️ <b>Range:</b> "
+        f"<code>{target_range}</code>\n\n"
+
+        f"📱 <b>Available Number:</b> "
+        f"{len(numbers)}"
+    )
+
+    markup = create_number_markup(
+        numbers,
+        target_range
+    )
+
+    await update.message.reply_text(
+        text,
+        reply_markup=markup,
+        parse_mode="HTML",
+    )
+
+
+# =========================================================
+# SET RANGE
+# =========================================================
+
+async def handle_set_range(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    user_id = update.effective_user.id
+
+    USER_STATES[user_id] = "WAITING_FOR_RANGE"
+
+    await update.message.reply_text(
+        "⚙️ <b>Set Target Range</b>\n\n"
+        "আপনার Range পাঠান।\n\n"
+        "উদাহরণ:\n"
+        "<code>22896</code>\n"
+        "অথবা\n"
+        "<code>88017XXX</code>",
+        parse_mode="HTML",
+    )
+
+
+# =========================================================
+# SAVE RANGE
+# =========================================================
+
+async def handle_range_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    user_id = update.effective_user.id
+
+    text = update.message.text.strip().upper()
+
+    # X বাদ দিলে বাকি অংশ numeric হতে হবে
+    test_value = text.replace("X", "")
+
+    if not test_value.isdigit():
+
+        await update.message.reply_text(
+            "❌ <b>Invalid Range!</b>\n\n"
+            "সঠিক উদাহরণ:\n"
+            "<code>22896</code>\n"
+            "অথবা\n"
+            "<code>88017XXX</code>",
+            parse_mode="HTML",
+        )
+
+        return
+
+    USER_RANGES[user_id] = text
+    USER_STATES[user_id] = None
+
+    await update.message.reply_text(
+        "✅ <b>Range Updated</b>\n\n"
+        f"⚙️ Range: <code>{text}</code>\n\n"
+        "এখন 📞 Get API Number চাপুন।",
+        parse_mode="HTML",
+    )
+
+
+# =========================================================
+# OTP GROUP
+# =========================================================
+
+async def handle_group(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "📣 Join OTP Group ↗",
+                url=f"https://t.me/{OTP_GROUP_USERNAME}"
+            )
+        ]
+    ])
+
+    await update.message.reply_text(
+        "📣 <b>OTP Group</b>\n\n"
+        "Group-এ যেতে নিচের button চাপুন।",
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
+
+
+# =========================================================
+# SUPPORT
+# =========================================================
+
+async def handle_support(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "👨‍💻 Contact Support",
+                url=f"https://t.me/{SUPPORT_USERNAME}"
+            )
+        ]
+    ])
+
+    await update.message.reply_text(
+        "👨‍💻 <b>Support</b>\n\n"
+        f"Support: @{SUPPORT_USERNAME}",
+        reply_markup=keyboard,
+        parse_mode="HTML",
     )
 
 
@@ -250,172 +513,53 @@ async def handle_message(
     text = update.message.text.strip()
 
     # -----------------------------------------------------
-    # SET RANGE
+    # Range input
     # -----------------------------------------------------
 
     if USER_STATES.get(user_id) == "WAITING_FOR_RANGE":
 
-        clean_text = text.upper().strip()
-
-        if clean_text.replace("X", "").isdigit():
-
-            USER_RANGES[user_id] = clean_text
-            USER_STATES[user_id] = None
-
-            await update.message.reply_text(
-                f"✅ Target Range Updated\n\n"
-                f"⚙️ Range: <code>{clean_text}</code>",
-                parse_mode="HTML"
-            )
-
-        else:
-
-            await update.message.reply_text(
-                "❌ Invalid Range!\n\n"
-                "Example:\n"
-                "<code>22896</code>\n"
-                "or\n"
-                "<code>88017XXX</code>",
-                parse_mode="HTML"
-            )
+        await handle_range_input(
+            update,
+            context
+        )
 
         return
 
     # -----------------------------------------------------
-    # GET NUMBER
+    # Menu buttons
     # -----------------------------------------------------
 
     if text == "📞 Get API Number":
 
-        wait_msg = await update.message.reply_text(
-            "⏳ Getting real number from MINO SMS..."
+        await handle_get_number(
+            update,
+            context
         )
-
-        target_range = USER_RANGES.get(
-            user_id,
-            "22896"
-        )
-
-        numbers = []
-
-        # 2টি number নেওয়ার চেষ্টা
-        for _ in range(2):
-
-            phone, order_id = await get_mino_number(
-                target_range
-            )
-
-            if phone and phone not in numbers:
-                numbers.append(phone)
-
-        try:
-            await wait_msg.delete()
-        except Exception:
-            pass
-
-        if not numbers:
-
-            await update.message.reply_text(
-                "❌ No Number Available!\n\n"
-                f"Panel has no available number for:\n"
-                f"<code>{target_range}</code>",
-                parse_mode="HTML"
-            )
-
-            return
-
-        # Country
-        country_name, country_code, flag = get_country_info(
-            numbers[0]
-        )
-
-        # Header
-        header = (
-            f"🌐 <b>Country:</b> "
-            f"{flag} {country_name}\n\n"
-            f"⚙️ <b>Range:</b> "
-            f"<code>{target_range}</code>"
-        )
-
-        markup = create_number_markup(numbers)
-
-        await update.message.reply_text(
-            header,
-            reply_markup=markup,
-            parse_mode="HTML"
-        )
-
-        return
-
-    # -----------------------------------------------------
-    # SET RANGE
-    # -----------------------------------------------------
 
     elif text == "⚙ Set Range":
 
-        USER_STATES[user_id] = "WAITING_FOR_RANGE"
-
-        await update.message.reply_text(
-            "⚙️ <b>Set Target Range</b>\n\n"
-            "আপনার Range পাঠান।\n\n"
-            "Example:\n"
-            "<code>22896</code>\n"
-            "অথবা\n"
-            "<code>88017XXX</code>",
-            parse_mode="HTML"
+        await handle_set_range(
+            update,
+            context
         )
-
-        return
-
-    # -----------------------------------------------------
-    # OTP GROUP
-    # -----------------------------------------------------
 
     elif text == "📣 OTP Group":
 
-        markup = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton(
-                    "📣 Join OTP Group ↗",
-                    url=f"https://t.me/{OTP_GROUP_USERNAME}"
-                )
-            ]
-        ])
-
-        await update.message.reply_text(
-            "📣 আমাদের OTP Group-এ যেতে নিচের button চাপুন:",
-            reply_markup=markup
+        await handle_group(
+            update,
+            context
         )
-
-        return
-
-    # -----------------------------------------------------
-    # SUPPORT
-    # -----------------------------------------------------
 
     elif text == "👨‍💻 Support":
 
-        markup = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton(
-                    "👨‍💻 Contact Support",
-                    url=f"https://t.me/{SUPPORT_USERNAME}"
-                )
-            ]
-        ])
-
-        await update.message.reply_text(
-            "👨‍💻 <b>Support</b>\n\n"
-            "যেকোনো সমস্যায় আমাদের Support-এ যোগাযোগ করুন।",
-            reply_markup=markup,
-            parse_mode="HTML"
+        await handle_support(
+            update,
+            context
         )
-
-        return
 
 
 # =========================================================
-# CALLBACK
+# CALLBACK HANDLER
 # =========================================================
 
 async def handle_callback(
@@ -440,21 +584,34 @@ async def handle_callback(
             "22896"
         )
 
+        wait_message = await query.message.reply_text(
+            "⏳ Getting a new number..."
+        )
+
         numbers = []
 
         for _ in range(2):
 
-            phone, order_id = await get_mino_number(
+            phone, order_id = await get_number(
                 target_range
             )
 
             if phone and phone not in numbers:
+
                 numbers.append(phone)
+
+        try:
+
+            await wait_message.delete()
+
+        except Exception:
+
+            pass
 
         if not numbers:
 
             await query.message.reply_text(
-                "❌ এই Range-এ বর্তমানে কোনো number পাওয়া যায়নি।"
+                "❌ এই Range-এ নতুন number পাওয়া যায়নি।"
             )
 
             return
@@ -463,75 +620,96 @@ async def handle_callback(
             numbers[0]
         )
 
-        header = (
+        text = (
             f"🌐 <b>Country:</b> "
             f"{flag} {country_name}\n\n"
+
             f"⚙️ <b>Range:</b> "
             f"<code>{target_range}</code>"
         )
 
-        markup = create_number_markup(numbers)
+        markup = create_number_markup(
+            numbers,
+            target_range
+        )
 
         try:
 
             await query.edit_message_text(
-                text=header,
+                text=text,
                 reply_markup=markup,
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
 
-        except Exception as e:
+        except Exception as error:
 
-            print("Edit Error:", e)
-
-        return
+            print("EDIT MESSAGE ERROR:", error)
 
     # -----------------------------------------------------
-    # BACK
+    # BACK HOME
     # -----------------------------------------------------
 
     elif query.data == "back_home":
 
         try:
+
             await query.message.delete()
+
         except Exception:
+
             pass
 
-        # callback update-এ message থাকতে পারে
-        if query.message:
+        await query.message.reply_text(
+            "🏠 <b>Main Menu</b>",
+            reply_markup=home_keyboard(),
+            parse_mode="HTML",
+        )
 
-            keyboard = [
-                ["📞 Get API Number", "⚙ Set Range"],
-                ["📣 OTP Group", "👨‍💻 Support"]
-            ]
 
-            markup = ReplyKeyboardMarkup(
-                keyboard,
-                resize_keyboard=True
-            )
+# =========================================================
+# ERROR HANDLER
+# =========================================================
 
-            await query.message.reply_text(
-                "🏠 <b>Main Menu</b>",
-                reply_markup=markup,
-                parse_mode="HTML"
-            )
+async def error_handler(
+    update: object,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    print(
+        "BOT ERROR:",
+        context.error
+    )
 
 
 # =========================================================
 # MAIN
 # =========================================================
 
-if __name__ == "__main__":
+def main():
+
+    # -----------------------------------------------------
+    # Check BOT TOKEN
+    # -----------------------------------------------------
 
     if not BOT_TOKEN:
+
         raise RuntimeError(
             "BOT_TOKEN environment variable is missing."
         )
 
+    # -----------------------------------------------------
+    # Check MINO API KEY
+    # -----------------------------------------------------
+
     if not MINO_API_KEY:
+
         raise RuntimeError(
             "MINO_API_KEY environment variable is missing."
         )
+
+    # -----------------------------------------------------
+    # Create bot
+    # -----------------------------------------------------
 
     app = (
         ApplicationBuilder()
@@ -539,8 +717,15 @@ if __name__ == "__main__":
         .build()
     )
 
+    # -----------------------------------------------------
+    # Handlers
+    # -----------------------------------------------------
+
     app.add_handler(
-        CommandHandler("start", start)
+        CommandHandler(
+            "start",
+            start
+        )
     )
 
     app.add_handler(
@@ -551,9 +736,39 @@ if __name__ == "__main__":
     )
 
     app.add_handler(
-        CallbackQueryHandler(handle_callback)
+        CallbackQueryHandler(
+            handle_callback
+        )
     )
 
-    print("🤖 Number Bot is running...")
+    app.add_error_handler(
+        error_handler
+    )
 
-    app.run_polling()
+    print(
+        "================================="
+    )
+
+    print(
+        "🤖 MINO NUMBER BOT STARTED"
+    )
+
+    print(
+        "================================="
+    )
+
+    # -----------------------------------------------------
+    # Run
+    # -----------------------------------------------------
+
+    app.run_polling(
+        drop_pending_updates=True
+    )
+
+
+# =========================================================
+# START PROGRAM
+# =========================================================
+
+if __name__ == "__main__":
+    main()
