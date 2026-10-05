@@ -125,15 +125,45 @@ def _sync_check_mino_otp(target_phone):
 async def check_mino_otp(target_phone):
     return await asyncio.to_thread(_sync_check_mino_otp, target_phone)
 
+# Background Task to push panel console/OTP logs to Telegram Group automatically
 async def auto_forward_console_logs(application):
     await asyncio.sleep(5)
     while True:
         try:
-            service_data, _ = await fetch_live_traffic_detailed()
-            # Background auto-forward logic can run smoothly here
+            headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
+            res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
+            if res.status_code == 200:
+                hits = res.json().get("data", [])
+                if isinstance(hits, list):
+                    for hit in hits:
+                        if not isinstance(hit, dict): continue
+                        msg = hit.get("message", "")
+                        num = hit.get("number") or hit.get("range", "")
+                        service = hit.get("service", "SMS")
+                        country = hit.get("country", "")
+                        
+                        # Unique identifier for each log to prevent duplicate sending
+                        log_id = f"{num}_{msg}"
+                        if log_id not in SEEN_OTP_IDS:
+                            SEEN_OTP_IDS.add(log_id)
+                            if len(SEEN_OTP_IDS) > 500:
+                                SEEN_OTP_IDS.pop()
+                            
+                            _, _, flag = get_country_info(num, country)
+                            group_text = (
+                                f"🚨 <b>LIVE PANEL OTP SIGNAL</b> 🚨\n\n"
+                                f"🌐 <b>Service:</b> {service}\n"
+                                f"🌍 <b>Country:</b> {flag} {country}\n"
+                                f"📱 <b>Number/Range:</b> <code>{num}</code>\n"
+                                f"💬 <b>Message:</b>\n<code>{msg}</code>"
+                            )
+                            try:
+                                await application.bot.send_message(chat_id=OTP_GROUP_CHAT_ID, text=group_text, parse_mode="HTML")
+                            except Exception as ex:
+                                print(f"Group Forward Error: {ex}")
         except Exception as e:
-            print(f"Auto Forward Error: {e}")
-        await asyncio.sleep(5)
+            print(f"Background Loop Error: {e}")
+        await asyncio.sleep(10)
 
 def create_number_markup(numbers_list):
     keyboard = []
@@ -158,6 +188,12 @@ async def poll_for_otp(chat_id, user_id, phone, context):
                 USER_BALANCES[user_id] = current_bal + 0.00122
                 otp_message = f"🚨 <b>NEW OTP RECEIVED!</b> 🚨\n\n📱 <b>Number:</b> <code>{phone}</code>\n🔑 <b>OTP Code:</b> <code>{status}</code>\n💰 <b>Earned:</b> +$0.00122"
                 await context.bot.send_message(chat_id=chat_id, text=otp_message, parse_mode="HTML")
+                
+                # Also forward to group
+                try:
+                    await context.bot.send_message(chat_id=OTP_GROUP_CHAT_ID, text=otp_message, parse_mode="HTML")
+                except:
+                    pass
                 return
         except Exception as e:
             print(f"Polling Send Error: {e}")
@@ -269,6 +305,24 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except: pass
         await start(update, context)
 
+    # Added handler for the Change button
+    elif data == "change_number":
+        await query.answer("🔄 Fetching a new number...")
+        user_range = USER_RANGES.get(user_id, "88017XXX")
+        p, oid = await get_mino_real_number(target_range=user_range)
+        if not p:
+            await query.answer(f"❌ No stock available for range {user_range}.", show_alert=True)
+            return
+
+        country_name, _, flag = get_country_info(p)
+        header_text = f"✅ <b>Number:</b> {flag} {country_name}"
+        reply_markup = create_number_markup([p])
+        try:
+            await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
+        except:
+            await query.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
+        asyncio.create_task(poll_for_otp(query.message.chat_id, user_id, p, context))
+
     elif data.startswith("tr_svc_"):
         await query.answer()
         sid = data.replace("tr_svc_", "")
@@ -343,8 +397,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("✅ Withdraw request submitted successfully.")
             USER_BALANCES[user_id] = 0.0
 
+async def post_init(application):
+    # Start background job for auto-forwarding console stream logs to the target group
+    asyncio.create_task(auto_forward_console_logs(application))
+
 if __name__ == '__main__':
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('help', help_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
