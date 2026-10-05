@@ -18,7 +18,7 @@ USER_RANGES = {}
 USER_BALANCES = {}  
 USER_WITHDRAW_INFO = {} 
 SEEN_OTP_IDS = set()
-ACTIVE_USER_NUMBERS = {} 
+ACTIVE_USER_NUMBERS = {} # user_id -> {"phone": exact_phone, "chat_id": chat_id, "sent_otps": set()}
 
 def get_country_info(phone_number, api_country=""):
     clean_num = str(phone_number).replace("+", "").strip()
@@ -137,6 +137,7 @@ async def auto_forward_console_logs(application):
                                 [InlineKeyboardButton("NUMBER BOT ↗", url="https://t.me/tamim_otp_bot")]
                             ])
                             
+                            # Group-e shob log jabe
                             try:
                                 await application.bot.send_message(
                                     chat_id=OTP_GROUP_CHAT_ID, 
@@ -148,16 +149,13 @@ async def auto_forward_console_logs(application):
                                 print(f"Group Forward Error: {ex}")
 
                             clean_log_num = ''.join(filter(str.isdigit, num))
+                            
+                            # STRICT EXACT MATCH: Personal chat-e shudhumatro user-er neya exact number match korlei ashbe
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 u_phone = ''.join(filter(str.isdigit, str(u_info.get("phone", ""))))
                                 
-                                # Flexible matching: Checks if log number contains user phone or vice-versa, or matches prefix
-                                matched = False
-                                if u_phone and clean_log_num:
-                                    if u_phone in clean_log_num or clean_log_num in u_phone or clean_log_num.startswith(u_phone[:8]):
-                                        matched = True
-                                        
-                                if matched:
+                                # Check jodi log-er number ebong user-er exact phone number purapuri ekoy hoy (kono range ba mismatch thakbe na)
+                                if u_phone and clean_log_num and u_phone == clean_log_num:
                                     match_otp = re.search(r'\b\d{4,8}\b', msg)
                                     otp_code = match_otp.group(0) if match_otp else msg
                                     
@@ -170,7 +168,7 @@ async def auto_forward_console_logs(application):
                                         personal_text = (
                                             f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
                                             f"🚨 <b>NEW OTP RECEIVED!</b> 🚨\n\n"
-                                            f"📱 <b>Number/Range:</b> <code>{num}</code>\n"
+                                            f"📱 <b>Number:</b> <code>{num}</code>\n"
                                             f"🔑 <b>OTP Code/Message:</b> <code>{otp_code}</code>\n"
                                             f"💰 <b>Earned:</b> +$0.00122"
                                         )
