@@ -100,7 +100,7 @@ def _sync_fetch_live_traffic_detailed():
 async def fetch_live_traffic_detailed():
     return await asyncio.to_thread(_sync_fetch_live_traffic_detailed)
 
-# Updated OTP check using console stream for accurate matching
+# Improved OTP checker using Range and Prefix matching from console
 def _sync_check_mino_otp_from_console(target_phone, target_range=""):
     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
     try:
@@ -109,14 +109,22 @@ def _sync_check_mino_otp_from_console(target_phone, target_range=""):
             hits = res.json().get("data", [])
             if isinstance(hits, list):
                 clean_target = ''.join(filter(str.isdigit, str(target_phone)))
-                clean_range = ''.join(filter(str.isdigit, str(target_range)))
+                clean_range = ''.join(filter(str.isdigit, str(target_range).replace("X", "").replace("x", "")))
+                
                 for hit in hits:
                     if not isinstance(hit, dict): continue
                     num_raw = str(hit.get("number") or hit.get("range", ""))
                     msg = str(hit.get("message", ""))
                     clean_num = ''.join(filter(str.isdigit, num_raw))
                     
-                    if (clean_target and clean_target in clean_num) or (clean_range and clean_range in clean_num):
+                    # Match by range prefix or exact phone number
+                    matched = False
+                    if clean_range and (clean_range in clean_num or clean_num.startswith(clean_range)):
+                        matched = True
+                    elif clean_target and (clean_target in clean_num or clean_num in clean_target):
+                        matched = True
+                        
+                    if matched:
                         match = re.search(r'\b\d{4,8}\b', msg)
                         if match: return match.group(0)
                         elif msg: return msg
@@ -327,7 +335,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sid = data.replace("tr_svc_", "")
         service_data, _ = await fetch_live_traffic_detailed()
         if sid not in service_data:
-            await query.answer("⚠️ No data available!", show_alert=True)
+            await query.answer("⚠️️ No data available!", show_alert=True)
             return
         
         countries = service_data[sid]
@@ -386,7 +394,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         USER_STATES[user_id] = "WAITING_FOR_BKASH"
         await query.message.reply_text("📲 Please send your bKash number:")
     elif data == "set_binance":
-        USER_STATES[user_id] = "WAITING_FOR_BINANCE"
+        USER_STATES[user_id] = "WAIT_FOR_BINANCE"
         await query.message.reply_text("🔴 Please send your Binance ID:")
     elif data == "withdraw_menu":
         user_bal = USER_BALANCES.get(user_id, 0.0)
