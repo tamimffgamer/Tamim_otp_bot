@@ -1,774 +1,417 @@
 import os
-import asyncio
+import time
+import threading
 import requests
+import telebot
 
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    ReplyKeyboardMarkup,
-    CopyTextButton,
-)
+from flask import Flask
 
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    filters,
-)
+# =========================================================
+# ENVIRONMENT VARIABLES
+# =========================================================
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+MINO_API_KEY = os.getenv("MINO_API_KEY")
+
+# আপনার অনুমোদিত aggregate traffic/statistics API
+# এখানে OTP/SMS content থাকবে না।
+TRAFFIC_API_URL = os.getenv("TRAFFIC_API_URL", "").strip()
+
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN environment variable is missing.")
+
+if not MINO_API_KEY:
+    raise RuntimeError("MINO_API_KEY environment variable is missing.")
 
 
 # =========================================================
-# CONFIGURATION
+# TELEGRAM BOT
 # =========================================================
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-MINO_API_KEY = os.environ.get("MINO_API_KEY")
-
-MINO_BASE_URL = "https://minosms.com"
-
-SUPPORT_USERNAME = "tmtamimmia"
-OTP_GROUP_USERNAME = "smm_otp_grup"
+bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
 
 
 # =========================================================
-# USER DATA
+# FLASK KEEP-ALIVE
 # =========================================================
 
-USER_STATES = {}
-USER_RANGES = {}
+app = Flask(__name__)
+
+
+@app.route("/")
+def home():
+    return "Bot is running."
+
+
+@app.route("/health")
+def health():
+    return "OK"
+
+
+def run_flask():
+    port = int(os.getenv("PORT", "10000"))
+    app.run(host="0.0.0.0", port=port)
 
 
 # =========================================================
-# COUNTRY INFORMATION
+# RANGE CONFIGURATION
+# =========================================================
+#
+# এখানে আপনার অনুমোদিত range ID বসাবেন।
+#
+# উদাহরণ:
+# 88017XXX
+# 22507XXX
+# 22896XXX
+# 23765XXX
+#
+# এগুলো শুধু range identifier।
+# কোনো ফোন নম্বর বা OTP এখানে রাখা হবে না।
 # =========================================================
 
-def get_country_info(phone_number):
+RANGES = [
+    {
+        "id": "88017XXX",
+        "country": "Bangladesh",
+        "flag": "🇧🇩"
+    },
+    {
+        "id": "22507XXX",
+        "country": "Ivory Coast",
+        "flag": "🇨🇮"
+    },
+    {
+        "id": "22896XXX",
+        "country": "Togo",
+        "flag": "🇹🇬"
+    },
+    {
+        "id": "23765XXX",
+        "country": "Cameroon",
+        "flag": "🇨🇲"
+    }
+]
 
-    number = str(phone_number).replace("+", "").strip()
 
-    countries = [
-        ("237", "Cameroon", "CM", "🇨🇲"),
-        ("225", "Ivory Coast", "CI", "🇨🇮"),
-        ("228", "Togo", "TG", "🇹🇬"),
-        ("229", "Benin", "BJ", "🇧🇯"),
-        ("255", "Tanzania", "TZ", "🇹🇿"),
-        ("266", "Lesotho", "LS", "🇱🇸"),
-        ("380", "Ukraine", "UA", "🇺🇦"),
-        ("224", "Guinea", "GN", "🇬🇳"),
-        ("996", "Kyrgyzstan", "KG", "🇰🇬"),
-        ("43", "Austria", "AT", "🇦🇹"),
-        ("880", "Bangladesh", "BD", "🇧🇩"),
+# =========================================================
+# CACHE
+# =========================================================
+
+TRAFFIC_CACHE = {}
+CACHE_TIME = 0
+CACHE_SECONDS = 10
+
+CACHE_LOCK = threading.Lock()
+
+
+# =========================================================
+# GET AGGREGATE TRAFFIC
+# =========================================================
+
+def get_traffic_data():
+    """
+    TRAFFIC_API_URL থেকে aggregate traffic data নেয়।
+
+    প্রত্যাশিত JSON format:
+
+    {
+        "ranges": [
+            {
+                "range": "22896XXX",
+                "traffic": 71
+            },
+            {
+                "range": "88017XXX",
+                "traffic": 128
+            }
+        ]
+    }
+
+    এখানে phone number, OTP বা SMS content ব্যবহার করা হয় না।
+    """
+
+    global TRAFFIC_CACHE
+    global CACHE_TIME
+
+    now = time.time()
+
+    with CACHE_LOCK:
+        if now - CACHE_TIME < CACHE_SECONDS and TRAFFIC_CACHE:
+            return TRAFFIC_CACHE.copy()
+
+    # API দেওয়া না থাকলে zero data
+    if not TRAFFIC_API_URL:
+        data = {}
+
+        for item in RANGES:
+            data[item["id"]] = 0
+
+        with CACHE_LOCK:
+            TRAFFIC_CACHE = data
+            CACHE_TIME = now
+
+        return data
+
+    try:
+        response = requests.get(
+            TRAFFIC_API_URL,
+            timeout=10
+        )
+
+        response.raise_for_status()
+
+        payload = response.json()
+
+        result = {}
+
+        for item in payload.get("ranges", []):
+            range_id = str(item.get("range", "")).strip()
+
+            try:
+                traffic = int(item.get("traffic", 0))
+            except (TypeError, ValueError):
+                traffic = 0
+
+            if range_id:
+                result[range_id] = max(traffic, 0)
+
+        # Configured ranges যেগুলো API-তে নেই
+        # সেগুলো 0 থাকবে
+        for item in RANGES:
+            result.setdefault(item["id"], 0)
+
+        with CACHE_LOCK:
+            TRAFFIC_CACHE = result
+            CACHE_TIME = now
+
+        return result
+
+    except Exception as e:
+        print("Traffic API error:", e)
+
+        # আগের cache থাকলে সেটা ব্যবহার
+        with CACHE_LOCK:
+            if TRAFFIC_CACHE:
+                return TRAFFIC_CACHE.copy()
+
+        return {
+            item["id"]: 0
+            for item in RANGES
+        }
+
+
+# =========================================================
+# SORT RANGES
+# =========================================================
+
+def get_sorted_ranges():
+    traffic = get_traffic_data()
+
+    data = []
+
+    for item in RANGES:
+        range_id = item["id"]
+
+        data.append({
+            "id": range_id,
+            "country": item["country"],
+            "flag": item["flag"],
+            "traffic": traffic.get(range_id, 0)
+        })
+
+    data.sort(
+        key=lambda x: x["traffic"],
+        reverse=True
+    )
+
+    return data
+
+
+# =========================================================
+# LIVE TRAFFIC MESSAGE
+# =========================================================
+
+def build_live_traffic_message():
+    ranges = get_sorted_ranges()
+
+    lines = [
+        "📊 <b>LIVE TRAFFIC</b>",
+        "",
+        "Panel-এর aggregate traffic অনুযায়ী ranking:",
+        ""
     ]
 
-    for prefix, name, code, flag in countries:
+    medals = {
+        1: "🥇",
+        2: "🥈",
+        3: "🥉"
+    }
 
-        if number.startswith(prefix):
-            return name, code, flag
+    for position, item in enumerate(ranges, start=1):
 
-    return "Unknown", "XX", "🌐"
+        medal = medals.get(position, f"{position}️⃣")
+
+        lines.append(
+            f"{medal} <b>{position}st</b> — "
+            f"{item['flag']} {item['country']}"
+        )
+
+        lines.append(
+            f"   ⚙️ Range: <code>{item['id']}</code>"
+        )
+
+        lines.append(
+            f"   📈 Traffic: <b>{item['traffic']}</b>"
+        )
+
+        lines.append("")
+
+    lines.append(
+        "🔄 <i>Refresh চাপলে সর্বশেষ aggregate data দেখা যাবে।</i>"
+    )
+
+    return "\n".join(lines)
 
 
 # =========================================================
-# MINO SMS API
+# MAIN MENU
 # =========================================================
 
-def sync_get_number(target_range):
+def main_keyboard():
 
-    if not MINO_API_KEY:
+    keyboard = telebot.types.InlineKeyboardMarkup(row_width=2)
 
-        print("ERROR: MINO_API_KEY is missing")
+    live_button = telebot.types.InlineKeyboardButton(
+        "📊 Live Traffic",
+        callback_data="live_traffic"
+    )
 
-        return None, None
+    refresh_button = telebot.types.InlineKeyboardButton(
+        "🔄 Refresh",
+        callback_data="refresh_traffic"
+    )
 
-    if not target_range:
+    keyboard.add(
+        live_button,
+        refresh_button
+    )
 
-        return None, None
+    return keyboard
 
-    # -----------------------------------------------------
-    # MINO documentation:
-    #
-    # Header:
-    # mauthapi: YOUR_API_KEY
-    #
-    # Payload:
-    # {"rid": "88017XXX"}
-    # -----------------------------------------------------
 
-    headers = {
-        "mauthapi": MINO_API_KEY,
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
+# =========================================================
+# /START
+# =========================================================
 
-    rid = str(target_range).strip().upper()
+@bot.message_handler(commands=["start"])
+def start_command(message):
 
-    payload = {
-        "rid": rid
-    }
+    text = (
+        "👋 <b>Welcome</b>\n\n"
+        "আপনি নিচের button ব্যবহার করে "
+        "panel-এর aggregate range traffic দেখতে পারবেন।\n\n"
+        "📊 <b>Live Traffic</b> চাপুন।"
+    )
+
+    bot.send_message(
+        message.chat.id,
+        text,
+        reply_markup=main_keyboard()
+    )
+
+
+# =========================================================
+# /TRAFFIC
+# =========================================================
+
+@bot.message_handler(commands=["traffic"])
+def traffic_command(message):
+
+    text = build_live_traffic_message()
+
+    bot.send_message(
+        message.chat.id,
+        text,
+        reply_markup=main_keyboard()
+    )
+
+
+# =========================================================
+# CALLBACK BUTTONS
+# =========================================================
+
+@bot.callback_query_handler(
+    func=lambda call: call.data in [
+        "live_traffic",
+        "refresh_traffic"
+    ]
+)
+def traffic_callback(call):
 
     try:
 
-        response = requests.post(
-            f"{MINO_BASE_URL}/getnumber.php",
-            headers=headers,
-            json=payload,
-            timeout=15,
+        # Telegram loading indicator বন্ধ
+        bot.answer_callback_query(call.id)
+
+        text = build_live_traffic_message()
+
+        bot.edit_message_text(
+            text,
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=main_keyboard()
         )
 
-        print("MINO HTTP:", response.status_code)
-        print("MINO RESPONSE:", response.text)
+    except Exception as e:
 
-        if response.status_code != 200:
-
-            return None, None
+        print("Callback error:", e)
 
         try:
-            data = response.json()
-
-        except ValueError:
-
-            print("MINO returned non-JSON response")
-
-            return None, None
-
-        # -------------------------------------------------
-        # Different possible response structures
-        # -------------------------------------------------
-
-        root = data if isinstance(data, dict) else {}
-
-        nested = root.get("data")
-
-        if not isinstance(nested, dict):
-            nested = {}
-
-        number = (
-            root.get("number")
-            or root.get("phone")
-            or root.get("full_number")
-            or root.get("national_number")
-
-            or nested.get("number")
-            or nested.get("phone")
-            or nested.get("full_number")
-            or nested.get("national_number")
-        )
-
-        order_id = (
-            root.get("id")
-            or root.get("order_id")
-            or root.get("booking_id")
-
-            or nested.get("id")
-            or nested.get("order_id")
-            or nested.get("booking_id")
-        )
-
-        if number:
-
-            return str(number), str(order_id or "")
-
-        print("Number field was not found in MINO response")
-
-    except requests.RequestException as error:
-
-        print("MINO REQUEST ERROR:", error)
-
-    except Exception as error:
-
-        print("MINO ERROR:", error)
-
-    return None, None
-
-
-async def get_number(target_range):
-
-    return await asyncio.to_thread(
-        sync_get_number,
-        target_range
-    )
-
-
-# =========================================================
-# NUMBER BUTTONS
-# =========================================================
-
-def create_number_markup(numbers, target_range):
-
-    keyboard = []
-
-    for number in numbers:
-
-        _, _, flag = get_country_info(number)
-
-        keyboard.append([
-            InlineKeyboardButton(
-                text=f"{flag} {number}",
-                copy_text=CopyTextButton(
-                    text=str(number)
-                )
+            bot.answer_callback_query(
+                call.id,
+                "Data refresh করা যায়নি। আবার চেষ্টা করুন।",
+                show_alert=True
             )
-        ])
-
-    # Change Number
-    keyboard.append([
-        InlineKeyboardButton(
-            "🔄 Change Number",
-            callback_data="change_number"
-        )
-    ])
-
-    # OTP Group
-    keyboard.append([
-        InlineKeyboardButton(
-            "📣 OTP Group",
-            url=f"https://t.me/{OTP_GROUP_USERNAME}"
-        )
-    ])
-
-    # Support
-    keyboard.append([
-        InlineKeyboardButton(
-            "👨‍💻 Support",
-            url=f"https://t.me/{SUPPORT_USERNAME}"
-        )
-    ])
-
-    # Back
-    keyboard.append([
-        InlineKeyboardButton(
-            "🔙 Back",
-            callback_data="back_home"
-        )
-    ])
-
-    return InlineKeyboardMarkup(keyboard)
+        except Exception:
+            pass
 
 
 # =========================================================
-# HOME MENU
+# ERROR-SAFE POLLING
 # =========================================================
 
-def home_keyboard():
+def run_bot():
 
-    keyboard = [
-        [
-            "📞 Get API Number",
-            "⚙ Set Range"
-        ],
-        [
-            "📣 OTP Group",
-            "👨‍💻 Support"
-        ],
-    ]
+    while True:
 
-    return ReplyKeyboardMarkup(
-        keyboard,
-        resize_keyboard=True
-    )
+        try:
+
+            print("Telegram bot started.")
+
+            bot.infinity_polling(
+                skip_pending=True,
+                timeout=30,
+                long_polling_timeout=30
+            )
+
+        except Exception as e:
+
+            print("Bot polling error:", e)
+
+            time.sleep(5)
 
 
 # =========================================================
 # START
 # =========================================================
 
-async def start(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    await update.message.reply_text(
-        "🤖 <b>Welcome to Number Bot!</b>\n\n"
-        "নিচের Menu থেকে একটি option নির্বাচন করুন।",
-        reply_markup=home_keyboard(),
-        parse_mode="HTML",
-    )
-
-
-# =========================================================
-# GET NUMBER
-# =========================================================
-
-async def handle_get_number(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    user_id = update.effective_user.id
-
-    target_range = USER_RANGES.get(
-        user_id,
-        "22896"
-    )
-
-    wait_message = await update.message.reply_text(
-        "⏳ <b>Getting number...</b>\n\n"
-        f"⚙️ Range: <code>{target_range}</code>",
-        parse_mode="HTML",
-    )
-
-    numbers = []
-
-    # দুইবার চেষ্টা করবে
-    for _ in range(2):
-
-        phone, order_id = await get_number(
-            target_range
-        )
-
-        if phone and phone not in numbers:
-
-            numbers.append(phone)
-
-    try:
-
-        await wait_message.delete()
-
-    except Exception:
-
-        pass
-
-    # -----------------------------------------------------
-    # No number
-    # -----------------------------------------------------
-
-    if not numbers:
-
-        await update.message.reply_text(
-            "❌ <b>No Number Available</b>\n\n"
-            f"⚙️ Range: <code>{target_range}</code>\n\n"
-            "এই Range-এ বর্তমানে number পাওয়া যায়নি।",
-            parse_mode="HTML",
-        )
-
-        return
-
-    # -----------------------------------------------------
-    # Country
-    # -----------------------------------------------------
-
-    country_name, country_code, flag = get_country_info(
-        numbers[0]
-    )
-
-    # -----------------------------------------------------
-    # Header
-    # -----------------------------------------------------
-
-    text = (
-        f"🌐 <b>Country:</b> "
-        f"{flag} {country_name}\n\n"
-
-        f"⚙️ <b>Range:</b> "
-        f"<code>{target_range}</code>\n\n"
-
-        f"📱 <b>Available Number:</b> "
-        f"{len(numbers)}"
-    )
-
-    markup = create_number_markup(
-        numbers,
-        target_range
-    )
-
-    await update.message.reply_text(
-        text,
-        reply_markup=markup,
-        parse_mode="HTML",
-    )
-
-
-# =========================================================
-# SET RANGE
-# =========================================================
-
-async def handle_set_range(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    user_id = update.effective_user.id
-
-    USER_STATES[user_id] = "WAITING_FOR_RANGE"
-
-    await update.message.reply_text(
-        "⚙️ <b>Set Target Range</b>\n\n"
-        "আপনার Range পাঠান।\n\n"
-        "উদাহরণ:\n"
-        "<code>22896</code>\n"
-        "অথবা\n"
-        "<code>88017XXX</code>",
-        parse_mode="HTML",
-    )
-
-
-# =========================================================
-# SAVE RANGE
-# =========================================================
-
-async def handle_range_input(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    user_id = update.effective_user.id
-
-    text = update.message.text.strip().upper()
-
-    # X বাদ দিলে বাকি অংশ numeric হতে হবে
-    test_value = text.replace("X", "")
-
-    if not test_value.isdigit():
-
-        await update.message.reply_text(
-            "❌ <b>Invalid Range!</b>\n\n"
-            "সঠিক উদাহরণ:\n"
-            "<code>22896</code>\n"
-            "অথবা\n"
-            "<code>88017XXX</code>",
-            parse_mode="HTML",
-        )
-
-        return
-
-    USER_RANGES[user_id] = text
-    USER_STATES[user_id] = None
-
-    await update.message.reply_text(
-        "✅ <b>Range Updated</b>\n\n"
-        f"⚙️ Range: <code>{text}</code>\n\n"
-        "এখন 📞 Get API Number চাপুন।",
-        parse_mode="HTML",
-    )
-
-
-# =========================================================
-# OTP GROUP
-# =========================================================
-
-async def handle_group(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "📣 Join OTP Group ↗",
-                url=f"https://t.me/{OTP_GROUP_USERNAME}"
-            )
-        ]
-    ])
-
-    await update.message.reply_text(
-        "📣 <b>OTP Group</b>\n\n"
-        "Group-এ যেতে নিচের button চাপুন।",
-        reply_markup=keyboard,
-        parse_mode="HTML",
-    )
-
-
-# =========================================================
-# SUPPORT
-# =========================================================
-
-async def handle_support(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "👨‍💻 Contact Support",
-                url=f"https://t.me/{SUPPORT_USERNAME}"
-            )
-        ]
-    ])
-
-    await update.message.reply_text(
-        "👨‍💻 <b>Support</b>\n\n"
-        f"Support: @{SUPPORT_USERNAME}",
-        reply_markup=keyboard,
-        parse_mode="HTML",
-    )
-
-
-# =========================================================
-# MESSAGE HANDLER
-# =========================================================
-
-async def handle_message(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    if not update.message:
-        return
-
-    user_id = update.effective_user.id
-    text = update.message.text.strip()
-
-    # -----------------------------------------------------
-    # Range input
-    # -----------------------------------------------------
-
-    if USER_STATES.get(user_id) == "WAITING_FOR_RANGE":
-
-        await handle_range_input(
-            update,
-            context
-        )
-
-        return
-
-    # -----------------------------------------------------
-    # Menu buttons
-    # -----------------------------------------------------
-
-    if text == "📞 Get API Number":
-
-        await handle_get_number(
-            update,
-            context
-        )
-
-    elif text == "⚙ Set Range":
-
-        await handle_set_range(
-            update,
-            context
-        )
-
-    elif text == "📣 OTP Group":
-
-        await handle_group(
-            update,
-            context
-        )
-
-    elif text == "👨‍💻 Support":
-
-        await handle_support(
-            update,
-            context
-        )
-
-
-# =========================================================
-# CALLBACK HANDLER
-# =========================================================
-
-async def handle_callback(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    query = update.callback_query
-
-    await query.answer()
-
-    # -----------------------------------------------------
-    # CHANGE NUMBER
-    # -----------------------------------------------------
-
-    if query.data == "change_number":
-
-        user_id = query.from_user.id
-
-        target_range = USER_RANGES.get(
-            user_id,
-            "22896"
-        )
-
-        wait_message = await query.message.reply_text(
-            "⏳ Getting a new number..."
-        )
-
-        numbers = []
-
-        for _ in range(2):
-
-            phone, order_id = await get_number(
-                target_range
-            )
-
-            if phone and phone not in numbers:
-
-                numbers.append(phone)
-
-        try:
-
-            await wait_message.delete()
-
-        except Exception:
-
-            pass
-
-        if not numbers:
-
-            await query.message.reply_text(
-                "❌ এই Range-এ নতুন number পাওয়া যায়নি।"
-            )
-
-            return
-
-        country_name, country_code, flag = get_country_info(
-            numbers[0]
-        )
-
-        text = (
-            f"🌐 <b>Country:</b> "
-            f"{flag} {country_name}\n\n"
-
-            f"⚙️ <b>Range:</b> "
-            f"<code>{target_range}</code>"
-        )
-
-        markup = create_number_markup(
-            numbers,
-            target_range
-        )
-
-        try:
-
-            await query.edit_message_text(
-                text=text,
-                reply_markup=markup,
-                parse_mode="HTML",
-            )
-
-        except Exception as error:
-
-            print("EDIT MESSAGE ERROR:", error)
-
-    # -----------------------------------------------------
-    # BACK HOME
-    # -----------------------------------------------------
-
-    elif query.data == "back_home":
-
-        try:
-
-            await query.message.delete()
-
-        except Exception:
-
-            pass
-
-        await query.message.reply_text(
-            "🏠 <b>Main Menu</b>",
-            reply_markup=home_keyboard(),
-            parse_mode="HTML",
-        )
-
-
-# =========================================================
-# ERROR HANDLER
-# =========================================================
-
-async def error_handler(
-    update: object,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    print(
-        "BOT ERROR:",
-        context.error
-    )
-
-
-# =========================================================
-# MAIN
-# =========================================================
-
-def main():
-
-    # -----------------------------------------------------
-    # Check BOT TOKEN
-    # -----------------------------------------------------
-
-    if not BOT_TOKEN:
-
-        raise RuntimeError(
-            "BOT_TOKEN environment variable is missing."
-        )
-
-    # -----------------------------------------------------
-    # Check MINO API KEY
-    # -----------------------------------------------------
-
-    if not MINO_API_KEY:
-
-        raise RuntimeError(
-            "MINO_API_KEY environment variable is missing."
-        )
-
-    # -----------------------------------------------------
-    # Create bot
-    # -----------------------------------------------------
-
-    app = (
-        ApplicationBuilder()
-        .token(BOT_TOKEN)
-        .build()
-    )
-
-    # -----------------------------------------------------
-    # Handlers
-    # -----------------------------------------------------
-
-    app.add_handler(
-        CommandHandler(
-            "start",
-            start
-        )
-    )
-
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            handle_message
-        )
-    )
-
-    app.add_handler(
-        CallbackQueryHandler(
-            handle_callback
-        )
-    )
-
-    app.add_error_handler(
-        error_handler
-    )
-
-    print(
-        "================================="
-    )
-
-    print(
-        "🤖 MINO NUMBER BOT STARTED"
-    )
-
-    print(
-        "================================="
-    )
-
-    # -----------------------------------------------------
-    # Run
-    # -----------------------------------------------------
-
-    app.run_polling(
-        drop_pending_updates=True
-    )
-
-
-# =========================================================
-# START PROGRAM
-# =========================================================
-
 if __name__ == "__main__":
-    main()
+
+    flask_thread = threading.Thread(
+        target=run_flask,
+        daemon=True
+    )
+
+    flask_thread.start()
+
+    run_bot()
