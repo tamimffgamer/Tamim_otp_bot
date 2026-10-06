@@ -20,6 +20,7 @@ USER_BALANCES = {}
 USER_WITHDRAW_INFO = {} 
 SEEN_OTP_IDS = set()
 ACTIVE_USER_NUMBERS = {} 
+BACKGROUND_TASK = None
 
 def get_country_info(phone_number, api_country=""):
     clean_num = str(phone_number).replace("+", "").strip()
@@ -180,7 +181,7 @@ async def auto_forward_console_logs(application):
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 req_time = u_info.get("req_time", 0)
                                 
-                                # STRICT 20-MINUTE TIMER CHECK
+                                # STRICT 20-MINUTE TIMER CHECK (1200 seconds)
                                 if current_loop_time - req_time > 1200:
                                     continue
 
@@ -189,7 +190,6 @@ async def auto_forward_console_logs(application):
                                 
                                 matched = False
                                 if clean_u_phone and clean_log_num:
-                                    # Perfect exact match or suffix match to avoid cross-number overlapping
                                     if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone):
                                         matched = True
                                 
@@ -446,7 +446,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             USER_BALANCES[user_id] = 0.0
 
 async def post_init(application):
-    application.create_task(auto_forward_console_logs(application))
+    global BACKGROUND_TASK
+    BACKGROUND_TASK = asyncio.create_task(auto_forward_console_logs(application))
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
