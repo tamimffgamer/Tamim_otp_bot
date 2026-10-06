@@ -28,7 +28,7 @@ def get_country_info(phone_number, api_country=""):
         if "madagascar" in c_lower: return "Madagascar", "MG", "🇲🇬"
         elif "ivory" in c_lower or "côte" in c_lower: return "Ivory Coast", "CI", "🇨🇮"
         elif "cameroon" in c_lower: return "Cameroon", "CM", "🇨🇲"
-        elif "togo" in c_lower: return "Togo", "TG", "🇹🇬"
+        elif "togo" in c_lower: return "Togo", "TG", "TG"
         elif "benin" in c_lower: return "Benin", "BJ", "🇧🇯"
         elif "tanzania" in c_lower: return "Tanzania", "TZ", "🇹🇿"
         elif "ukraine" in c_lower: return "Ukraine", "UA", "🇺🇦"
@@ -180,10 +180,8 @@ async def auto_forward_console_logs(application):
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 req_time = u_info.get("req_time", 0)
                                 
-                                # CRITICAL FIX: Ignore any message whose timestamp/existence predates the user requesting this number
-                                if hit.get("time") and str(hit.get("time")) < str(u_info.get("req_formatted_time", "")):
-                                    continue
-                                if current_loop_time - req_time < 1: 
+                                # Ignore messages older than the number request time (using 3 seconds buffer)
+                                if current_loop_time - req_time < 3:
                                     continue
 
                                 u_phone = str(u_info.get("phone", ""))
@@ -289,13 +287,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ No stock available for range <code>{user_range}</code>.", parse_mode="HTML")
             return
 
-        current_formatted_time = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
-
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": update.effective_chat.id,
             "req_time": time.time(),
-            "req_formatted_time": current_formatted_time,
             "sent_otps": set()
         }
 
@@ -359,13 +354,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer(f"❌ No stock available for range {user_range}.", show_alert=True)
             return
 
-        current_formatted_time = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
-
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": query.message.chat_id,
             "req_time": time.time(),
-            "req_formatted_time": current_formatted_time,
             "sent_otps": set()
         }
 
