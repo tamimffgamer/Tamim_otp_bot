@@ -31,7 +31,7 @@ def get_country_info(phone_number, api_country=""):
         elif "benin" in c_lower: return "Benin", "BJ", "🇧🇯"
         elif "tanzania" in c_lower: return "Tanzania", "TZ", "🇹🇿"
         elif "ukraine" in c_lower: return "Ukraine", "UA", "🇺🇦"
-        elif "kyrgyzstan" in c_lower: return "Kyrgyzstan", "KG", "🇰🇬"
+        elif "kyrgyzstan" in c_lower: return "Kyrgyzstan", "KG", "KG"
     
     if clean_num.startswith("880"): return "Bangladesh", "BD", "🇧🇩"
     elif clean_num.startswith("237"): return "Cameroon", "CM", "🇨🇲"
@@ -49,7 +49,7 @@ def _sync_get_mino_real_number(target_range):
     clean_rid = str(target_range).upper().strip()
     payload = {"rid": clean_rid}
     try:
-        res = requests.post(f"{BASE_API_URL}/getnumber.php", headers=headers, json=payload, timeout=2.0)
+        res = requests.post(f"{BASE_API_URL}/getnumber.php", headers=headers, json=payload, timeout=3.0)
         if res.status_code == 200:
             res_data = res.json()
             data = res_data.get("data", {})
@@ -124,7 +124,7 @@ def get_existing_otps_for_number(phone):
     return existing_otps
 
 async def auto_forward_console_logs(application):
-    await asyncio.sleep(5)
+    await asyncio.sleep(3)
     try:
         headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
         res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
@@ -232,7 +232,7 @@ async def auto_forward_console_logs(application):
                                             print(f"Personal Send Error: {per_ex}")
         except Exception as e:
             print(f"Background Loop Error: {e}")
-        await asyncio.sleep(4)
+        await asyncio.sleep(3)
 
 def create_single_number_markup(phone_num):
     _, _, flag = get_country_info(phone_num)
@@ -301,7 +301,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ No stock available for range <code>{user_range}</code>.", parse_mode="HTML")
             return
 
-        # Purono ba age theke thaka OTP gulo ignore korar jonno pre-load kora hocche
         existing_otps = await asyncio.to_thread(get_existing_otps_for_number, phone)
 
         ACTIVE_USER_NUMBERS[user_id] = {
@@ -462,7 +461,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             USER_BALANCES[user_id] = 0.0
 
 async def post_init(application):
-    asyncio.create_task(auto_forward_console_logs(application))
+    application.create_task(auto_forward_console_logs(application))
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
