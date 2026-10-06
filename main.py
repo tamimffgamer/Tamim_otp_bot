@@ -111,7 +111,6 @@ def _sync_check_minosms_otp(target_phone, order_id):
     clean_target = ''.join(filter(str.isdigit, str(target_phone)))
     short_target = clean_target[-6:] if len(clean_target) >= 6 else clean_target
     
-    # Panel er shob possible success/history endpoints check korbe
     endpoints = ["/success-otp", "/console.php", "/history", "/api/history"]
     
     for ep in endpoints:
@@ -228,7 +227,7 @@ async def poll_for_otp(chat_id, order_id, phone, context):
         try:
             otp_code, full_msg = await check_minosms_otp(phone, order_id)
             if otp_code:
-                country_name, _, flag = get_country_info(phone)
+                _, _, flag = get_country_info(phone)
                 otp_message = (
                     f"🚨 <b>SUCCESS! OTP RECEIVED</b> 🚨\n"
                     f"━━━━━━━━━━━━━━━━━━━\n"
@@ -299,8 +298,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ <b>No Real Number Available!</b>\n\nPanel has no stock for range <code>{user_range}</code>.", parse_mode="HTML")
             return
 
-        country_name, _, flag = get_country_info(numbers[0])
-        header_text = f"✅ <b>Number:</b> {flag} {country_name}\n⏳ Listening live for OTP..."
+        _, _, flag = get_country_info(numbers[0])
+        header_text = f"✅ <b>Number:</b> {flag}\n⏳ Listening live for OTP..."
         
         reply_markup = create_number_markup(numbers)
         await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
@@ -377,8 +376,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not numbers: return
 
-        country_name, _, flag = get_country_info(numbers[0])
-        header_text = f"✅ <b>Number:</b> {flag} {country_name}\n⏳ Listening live for OTP..."
+        _, _, flag = get_country_info(numbers[0])
+        header_text = f"✅ <b>Number:</b> {flag}\n⏳ Listening live for OTP..."
         reply_markup = create_number_markup(numbers)
         try:
             await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
