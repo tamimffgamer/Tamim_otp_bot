@@ -113,9 +113,6 @@ async def auto_forward_console_logs(application):
                 if isinstance(hits, list):
                     for hit in hits:
                         if not isinstance(hit, dict): continue
-                        
-                        # রেন্ডার লগে পুরো হিট ডাটা প্রিন্ট করবে যাতে নিখুঁত দেখা যায়
-                        print(f"DEBUG HIT OBJECT: {hit}")
 
                         msg = hit.get("message") or hit.get("text") or hit.get("sms") or ""
                         num = str(
@@ -137,6 +134,7 @@ async def auto_forward_console_logs(application):
                             
                             _, _, flag = get_country_info(num, country)
                             
+                            # পাবলিক গ্রুপে সব ওটিপি যাবে
                             group_text = (
                                 f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
                                 f"📘 <b>{service} OTP RECEIVE</b>\n\n"
@@ -161,13 +159,14 @@ async def auto_forward_console_logs(application):
 
                             clean_log_num = ''.join(filter(str.isdigit, num))
                             
+                            # শুধুমাত্র যার নাম্বারে ওটিপি এসেছে, তার পার্সোনাল ইনবক্সেই শুধু পাঠানো হবে
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
-                                u_phone = u_info.get("phone", "")
-                                clean_u_phone = ''.join(filter(str.isdigit, str(u_phone)))
+                                u_phone = str(u_info.get("phone", ""))
+                                clean_u_phone = ''.join(filter(str.isdigit, u_phone))
                                 
                                 matched = False
                                 if clean_u_phone and clean_log_num:
-                                    if clean_u_phone in clean_log_num or clean_log_num in clean_u_phone or clean_u_phone[-8:] == clean_log_num[-8:]:
+                                    if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone) or clean_u_phone.endswith(clean_log_num):
                                         matched = True
                                 
                                 if matched:
@@ -182,7 +181,7 @@ async def auto_forward_console_logs(application):
                                         
                                         personal_text = (
                                             f"🚨 <b>NEW OTP RECEIVED!</b> 🚨\n\n"
-                                            f"📱 <b>Number:</b> <code>{num}</code>\n"
+                                            f"📱 <b>Number:</b> <code>{u_phone}</code>\n"
                                             f"🔑 <b>OTP Code:</b> <code>{otp_code}</code>\n"
                                             f"💰 <b>Earned:</b> +$0.00122"
                                         )
