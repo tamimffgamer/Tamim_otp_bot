@@ -12,7 +12,7 @@ API_KEY = "mino_live_a5db48f1d607f390b0d3bd1fccfcd17"
 BASE_API_URL = "https://minosms.com"
 
 YOUR_TELEGRAM_USERNAME = "smm_otp_grup"
-OTP_GROUP_CHAT_ID = -1004436883235
+OTP_GROUP_CHAT_ID = -5452590003
 
 USER_STATES = {}
 USER_RANGES = {}
