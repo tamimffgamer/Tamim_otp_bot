@@ -56,29 +56,52 @@ async def get_minosms_real_number(target_range="22896"):
 
 def _sync_fetch_live_traffic():
     headers = {"mauthapi": MINOSMS_API_KEY, "Accept": "application/json"}
-    range_counts = {}
+    service_data = {}
     total_hits = 0
-    try:
-        res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=5)
-        if res.status_code == 200:
-            res_json = res.json()
-            hits = res_json.get("data", {}).get("hits", []) or res_json.get("data", []) or res_json.get("hits", [])
-            if isinstance(hits, list):
-                total_hits = len(hits)
-                for hit in hits:
-                    if not isinstance(hit, dict): continue
-                    r = hit.get("range") or hit.get("rid")
-                    sid = hit.get("sid", "FACEBOOK")
-                    if r:
-                        clean_r = str(r).strip()
-                        if clean_r in range_counts:
-                            range_counts[clean_r]["count"] += 1
-                        else:
-                            range_counts[clean_r] = {"sid": str(sid).upper(), "count": 1}
-    except Exception as e:
-        print(f"Traffic Error: {e}")
-    sorted_ranges = sorted(range_counts.items(), key=lambda x: x[1]["count"], reverse=True)
-    return sorted_ranges, total_hits
+    endpoints = ["/console.php", "/console", "/api/console", "/gettraffic"]
+    
+    for ep in endpoints:
+        try:
+            res = requests.get(f"{BASE_API_URL}{ep}", headers=headers, timeout=5)
+            if res.status_code == 200:
+                res_json = res.json()
+                data = res_json.get("data", res_json)
+                hits = []
+                if isinstance(data, dict):
+                    hits = data.get("hits", data.get("services", data.get("list", [])))
+                elif isinstance(data, list):
+                    hits = data
+                
+                if hits:
+                    if isinstance(hits, dict):
+                        for s_name, s_info in hits.items():
+                            s_upper = str(s_name).upper()
+                            if s_upper not in service_data:
+                                service_data[s_upper] = []
+                            ranges = s_info if isinstance(s_info, list) else s_info.get("ranges", [])
+                            for r_item in ranges:
+                                total_hits += 1
+                                r_val = r_item.get("range") or r_item.get("rid") or str(r_item)
+                                if r_val not in service_data[s_upper]:
+                                    service_data[s_upper].append(str(r_val))
+                    elif isinstance(hits, list):
+                        for hit in hits:
+                            if not isinstance(hit, dict): continue
+                            total_hits += 1
+                            r = hit.get("range") or hit.get("rid") or hit.get("number")
+                            sid = hit.get("sid", hit.get("service", "FACEBOOK"))
+                            if r:
+                                s_upper = str(sid).upper()
+                                if s_upper not in service_data:
+                                    service_data[s_upper] = []
+                                clean_r = str(r).strip()
+                                if clean_r not in service_data[s_upper]:
+                                    service_data[s_upper].append(clean_r)
+                    if service_data:
+                        break
+        except Exception as e:
+            continue
+    return service_data, total_hits
 
 async def fetch_live_traffic_from_panel():
     return await asyncio.to_thread(_sync_fetch_live_traffic)
@@ -131,7 +154,6 @@ async def auto_forward_console_logs(application):
             hits = await asyncio.to_thread(fetch_console_hits)
             for hit in hits:
                 if not isinstance(hit, dict): continue
-                
                 r = hit.get("range", "")
                 sid = hit.get("sid", "FACEBOOK")
                 msg = hit.get("message", "N/A")
@@ -140,17 +162,12 @@ async def auto_forward_console_logs(application):
                 unique_id = f"{r}_{t_stamp}_{msg}"
                 if unique_id in SEEN_OTP_IDS:
                     continue
-                
                 SEEN_OTP_IDS.add(unique_id)
                 if len(SEEN_OTP_IDS) > 500:
                     SEEN_OTP_IDS.clear()
 
                 clean_num = str(r)
-                if len(clean_num) > 6:
-                    masked_num = clean_num[:6] + "X" * (len(clean_num) - 6)
-                else:
-                    masked_num = clean_num
-
+                masked_num = clean_num[:6] + "X" * (len(clean_num) - 6) if len(clean_num) > 6 else clean_num
                 country_name, country_code, flag = get_country_info(str(r))
                 
                 log_text = (
@@ -181,7 +198,6 @@ async def auto_forward_console_logs(application):
                     print(f"Telegram Send Error: {send_err}")
         except Exception as e:
             print(f"Auto Forward Error: {e}")
-        
         await asyncio.sleep(3)
 
 def create_number_markup(numbers_list):
@@ -275,18 +291,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif "Live Traffic" in text:
         USER_STATES[user_id] = None
-        sorted_ranges, total_hits = await fetch_live_traffic_from_panel()
-        traffic_lines = ["📊 <b>Live Traffic</b>\n", f"📋 <b>Total OTP:</b> {total_hits}", f"⏱ <b>Record:</b> Last 15 Minutes\n"]
-        if sorted_ranges:
-            top_r, top_info = sorted_ranges[0]
-            _, _, top_flag = get_country_info(top_r)
-            traffic_lines.append(f"👑 <b>Top Range:</b> {top_flag} <code>{top_r}</code> - {top_info['sid']}")
-            traffic_lines.append("\n📥 <b>Range List</b>")
-            for r, info in sorted_ranges:
-                _, _, flag = get_country_info(r)
-                traffic_lines.append(f"• {flag} <code>{r}</code> - {info['sid']} - {info['count']}")
+        wait_traffic = await update.message.reply_text("⏳ Fetching live traffic from panel...")
+        
+        service_data, total_hits = await fetch_live_traffic_from_panel()
+        
+        try:
+            await wait_traffic.delete()
+        except Exception:
+            pass
+            
+        traffic_lines = [
+            "📊 <b>Live Traffic Summary</b>",
+            f"📋 <b>Total Ranges/Hits:</b> {total_hits}",
+            f"⏱ <b>Record:</b> Active Panel Services\n",
+            "━━━━━━━━━━━━━━━━━━━"
+        ]
+        
+        if service_data:
+            for service_name, ranges_list in service_data.items():
+                ranges_count = len(ranges_list)
+                traffic_lines.append(f"🔹 <b>{service_name}</b> <code>[{ranges_count} Ranges]</code>")
+                sample_ranges = ", ".join([f"<code>{r}</code>" for r in ranges_list[:4]])
+                if sample_ranges:
+                    traffic_lines.append(f"   ↳ {sample_ranges}")
+                traffic_lines.append("")
         else:
-            traffic_lines.append("⚠️ No active ranges found right now.")
+            traffic_lines.append("⚠️ No active traffic ranges found right now.")
+            
         await update.message.reply_text("\n".join(traffic_lines), parse_mode="HTML")
 
     elif "Balance" in text:
