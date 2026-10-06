@@ -37,7 +37,7 @@ def get_country_info(phone_number, api_country=""):
     if clean_num.startswith("880"): return "Bangladesh", "BD", "🇧🇩"
     elif clean_num.startswith("237"): return "Cameroon", "CM", "🇨🇲"
     elif clean_num.startswith("225"): return "Ivory Coast", "CI", "🇨🇮"
-    elif clean_num.startswith("228"): return "Togo", "TG", "🇹🇬"
+    elif clean_num.startswith("228"): return "Togo", "TG", "TG"
     elif clean_num.startswith("261"): return "Madagascar", "MG", "🇲🇬"
     else: return "International", "INT", "🌍"
 
@@ -127,6 +127,7 @@ async def auto_forward_console_logs(application):
                 res_json = res.json()
                 hits = res_json.get("data", [])
                 if isinstance(hits, list):
+                    current_loop_time = time.time()
                     for hit in hits:
                         if not isinstance(hit, dict): continue
 
@@ -179,23 +180,17 @@ async def auto_forward_console_logs(application):
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 req_time = u_info.get("req_time", 0)
                                 
-                                # STRICT CHECK: Ignore any log that appeared before the user requested the number
-                                hit_time_str = hit.get("time") or hit.get("created_at") or hit.get("date") or ""
-                                try:
-                                    import dateutil.parser
-                                    parsed_time = dateutil.parser.parse(str(hit_time_str)).timestamp()
-                                    if parsed_time < req_time:
-                                        continue
-                                except:
-                                    # Fallback if time format isn't standard
-                                    pass
+                                # STRICT 20-MINUTE TIMER CHECK
+                                if current_loop_time - req_time > 1200:
+                                    continue
 
                                 u_phone = str(u_info.get("phone", ""))
                                 clean_u_phone = ''.join(filter(str.isdigit, u_phone))
                                 
                                 matched = False
                                 if clean_u_phone and clean_log_num:
-                                    if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone) or clean_u_phone in clean_log_num or clean_log_num in clean_u_phone:
+                                    # Perfect exact match or suffix match to avoid cross-number overlapping
+                                    if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone):
                                         matched = True
                                 
                                 if matched:
