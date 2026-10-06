@@ -180,7 +180,11 @@ async def auto_forward_console_logs(application):
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 req_time = u_info.get("req_time", 0)
                                 
-                                # Ignore messages older than the number request time (using 3 seconds buffer)
+                                # FIX: Number neyar por theke shudhu matro 20 min (1200 seconds) er moddhe asha code-i allow korbe
+                                if current_loop_time - req_time > 1200:
+                                    continue
+                                
+                                # Ignore messages generated before the user requested the number
                                 if current_loop_time - req_time < 3:
                                     continue
 
