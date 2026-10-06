@@ -111,27 +111,36 @@ def _sync_check_minosms_otp(target_phone, order_id):
     clean_target = ''.join(filter(str.isdigit, str(target_phone)))
     short_target = clean_target[-6:] if len(clean_target) >= 6 else clean_target
     
-    try:
-        res = requests.get(f"{BASE_API_URL}/success-otp", headers=headers, timeout=3)
-        if res.status_code == 200:
-            res_json = res.json()
-            otps = res_json.get("data", {}).get("otps", []) or []
-            if isinstance(otps, list):
-                for otp_item in otps:
-                    if not isinstance(otp_item, dict): continue
-                    num_raw = str(otp_item.get("number", ""))
-                    msg = str(otp_item.get("message", ""))
-                    clean_num = ''.join(filter(str.isdigit, num_raw))
-                    
-                    if short_target in clean_num or (clean_target and clean_target in clean_num):
-                        match = re.search(r'\b\d{4,8}\b', msg)
-                        if match:
-                            return match.group(0)
-                        elif msg:
-                            return msg
-    except Exception as e:
-        print(f"OTP Check Error: {e}")
-    return None
+    # Panel er shob possible success/history endpoints check korbe
+    endpoints = ["/success-otp", "/console.php", "/history", "/api/history"]
+    
+    for ep in endpoints:
+        try:
+            res = requests.get(f"{BASE_API_URL}{ep}", headers=headers, timeout=4)
+            if res.status_code == 200:
+                res_json = res.json()
+                data = res_json.get("data", res_json)
+                otps = []
+                if isinstance(data, dict):
+                    otps = data.get("otps", data.get("hits", data.get("list", [])))
+                elif isinstance(data, list):
+                    otps = data
+                
+                if isinstance(otps, list):
+                    for otp_item in otps:
+                        if not isinstance(otp_item, dict): continue
+                        num_raw = str(otp_item.get("number", otp_item.get("full_number", otp_item.get("range", ""))))
+                        msg = str(otp_item.get("message", otp_item.get("msg", "")))
+                        clean_num = ''.join(filter(str.isdigit, num_raw))
+                        
+                        if short_target in clean_num or (clean_target and clean_target in clean_num):
+                            if msg and msg != "N/A" and msg != "None":
+                                match = re.search(r'\b\d{4,8}\b', msg)
+                                otp_code = match.group(0) if match else msg
+                                return otp_code, msg
+        except Exception as e:
+            continue
+    return None, None
 
 async def check_minosms_otp(target_phone, order_id):
     return await asyncio.to_thread(_sync_check_minosms_otp, target_phone, order_id)
@@ -168,7 +177,7 @@ async def auto_forward_console_logs(application):
 
                 clean_num = str(r)
                 masked_num = clean_num[:6] + "X" * (len(clean_num) - 6) if len(clean_num) > 6 else clean_num
-                country_name, country_code, flag = get_country_info(str(r))
+                _, country_code, flag = get_country_info(str(r))
                 
                 log_text = (
                     f"<b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b>                    <b>Admin</b>\n"
@@ -215,14 +224,28 @@ def create_number_markup(numbers_list):
 
 async def poll_for_otp(chat_id, order_id, phone, context):
     for _ in range(300): 
-        await asyncio.sleep(1) 
+        await asyncio.sleep(2) 
         try:
-            status = await check_minosms_otp(phone, order_id)
-            if status:
-                otp_message = f"🚨 <b>NEW OTP RECEIVED!</b> 🚨\n\n📱 <b>Number:</b> <code>{phone}</code>\n🔑 <b>OTP Code:</b> <code>{status}</code>"
+            otp_code, full_msg = await check_minosms_otp(phone, order_id)
+            if otp_code:
+                country_name, _, flag = get_country_info(phone)
+                otp_message = (
+                    f"🚨 <b>SUCCESS! OTP RECEIVED</b> 🚨\n"
+                    f"━━━━━━━━━━━━━━━━━━━\n"
+                    f"{flag} <b>Number:</b> <code>{phone}</code>\n"
+                    f"🔑 <b>OTP Code:</b> <code>{otp_code}</code>\n"
+                    f"✉ <b>Full Message:</b>\n<code>{full_msg}</code>"
+                )
+                
+                markup = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📋 Copy OTP", copy_text=CopyTextButton(text=otp_code))],
+                    [InlineKeyboardButton("🔄 Get New Number", callback_data="change_number")]
+                ])
+                
                 await context.bot.send_message(
                     chat_id=chat_id, 
                     text=otp_message, 
+                    reply_markup=markup,
                     parse_mode="HTML"
                 )
                 return
@@ -277,7 +300,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         country_name, _, flag = get_country_info(numbers[0])
-        header_text = f"✅ <b>Number:</b> {flag} {country_name}"
+        header_text = f"✅ <b>Number:</b> {flag} {country_name}\n⏳ Listening live for OTP..."
         
         reply_markup = create_number_markup(numbers)
         await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
@@ -355,7 +378,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not numbers: return
 
         country_name, _, flag = get_country_info(numbers[0])
-        header_text = f"✅ <b>Number:</b> {flag} {country_name}"
+        header_text = f"✅ <b>Number:</b> {flag} {country_name}\n⏳ Listening live for OTP..."
         reply_markup = create_number_markup(numbers)
         try:
             await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
