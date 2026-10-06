@@ -117,7 +117,6 @@ async def auto_forward_console_logs(application):
                         service = hit.get("service", "SMS")
                         country = hit.get("country", "")
                         
-                        # Range ba 'X' thakle baire group e jabe kintu personal user inbox e jabe na
                         if "X" in num.upper():
                             continue
 
@@ -157,8 +156,13 @@ async def auto_forward_console_logs(application):
                                 u_phone = u_info.get("phone", "")
                                 clean_u_phone = ''.join(filter(str.isdigit, str(u_phone)))
                                 
-                                # Shudhumatro user er nitekhon/active kora exact number er sathe match korlei personal inbox-e jabe
-                                if clean_u_phone and clean_log_num and clean_u_phone == clean_log_num:
+                                # Flexible matching (checks substring or last 8-9 digits to avoid format mismatch)
+                                matched = False
+                                if clean_u_phone and clean_log_num:
+                                    if clean_u_phone in clean_log_num or clean_log_num in clean_u_phone or clean_u_phone[-8:] == clean_log_num[-8:]:
+                                        matched = True
+                                
+                                if matched:
                                     match_otp = re.search(r'\b\d{4,8}\b', msg)
                                     otp_code = match_otp.group(0) if match_otp else msg
                                     
