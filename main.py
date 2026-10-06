@@ -18,7 +18,7 @@ USER_RANGES = {}
 USER_BALANCES = {}  
 USER_WITHDRAW_INFO = {} 
 SEEN_OTP_IDS = set()
-ACTIVE_USER_NUMBERS = {} # user_id -> {"phone": phone, "chat_id": chat_id, "sent_otps": set()}
+ACTIVE_USER_NUMBERS = {} 
 
 def get_country_info(phone_number, api_country=""):
     clean_num = str(phone_number).replace("+", "").strip()
@@ -113,10 +113,13 @@ async def auto_forward_console_logs(application):
                     for hit in hits:
                         if not isinstance(hit, dict): continue
                         msg = hit.get("message", "")
-                        num = str(hit.get("number") or hit.get("range", ""))
+                        num = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("phone_number") or hit.get("range", ""))
                         service = hit.get("service", "SMS")
                         country = hit.get("country", "")
                         
+                        # ডিবাগ করার জন্য রেন্ডার লগে ডেটা প্রিন্ট করবে
+                        print(f"DEBUG HIT -> Num: {num}, Msg: {msg}")
+
                         if "X" in num.upper():
                             continue
 
@@ -156,7 +159,6 @@ async def auto_forward_console_logs(application):
                                 u_phone = u_info.get("phone", "")
                                 clean_u_phone = ''.join(filter(str.isdigit, str(u_phone)))
                                 
-                                # Flexible matching (checks substring or last 8-9 digits to avoid format mismatch)
                                 matched = False
                                 if clean_u_phone and clean_log_num:
                                     if clean_u_phone in clean_log_num or clean_log_num in clean_u_phone or clean_u_phone[-8:] == clean_log_num[-8:]:
