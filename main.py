@@ -28,7 +28,7 @@ def get_country_info(phone_number, api_country=""):
         if "madagascar" in c_lower: return "Madagascar", "MG", "🇲🇬"
         elif "ivory" in c_lower or "côte" in c_lower: return "Ivory Coast", "CI", "🇨🇮"
         elif "cameroon" in c_lower: return "Cameroon", "CM", "🇨🇲"
-        elif "togo" in c_lower: return "Togo", "TG", "TG"
+        elif "togo" in c_lower: return "Togo", "TG", "🇹🇬"
         elif "benin" in c_lower: return "Benin", "BJ", "🇧🇯"
         elif "tanzania" in c_lower: return "Tanzania", "TZ", "🇹🇿"
         elif "ukraine" in c_lower: return "Ukraine", "UA", "🇺🇦"
@@ -103,7 +103,7 @@ async def fetch_live_traffic_detailed():
     return await asyncio.to_thread(_sync_fetch_live_traffic_detailed)
 
 async def auto_forward_console_logs(application):
-    await asyncio.sleep(3)
+    await asyncio.sleep(2)
     try:
         headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
         res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
@@ -148,7 +148,7 @@ async def auto_forward_console_logs(application):
                         log_id = f"{num}_{msg}"
                         if log_id not in SEEN_OTP_IDS:
                             SEEN_OTP_IDS.add(log_id)
-                            if len(SEEN_OTP_IDS) > 2000:
+                            if len(SEEN_OTP_IDS) > 3000:
                                 SEEN_OTP_IDS.pop()
                             
                             _, _, flag = get_country_info(num, country)
@@ -177,18 +177,24 @@ async def auto_forward_console_logs(application):
 
                             clean_log_num = ''.join(filter(str.isdigit, num))
                             
+                            # Ebar shudhu matro oi user-er neya specific active number-er sathe strict match korano hocche
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 req_time = u_info.get("req_time", 0)
                                 
-                                # STRICT CHECK: User number neyar aagerta ba 20 minutes (1200s) porer message baad debe
+                                # Number neyar por 20 minutes (1200 seconds) er moddhe asha message gulo-i consider hobe
                                 if current_loop_time < req_time or (current_loop_time - req_time) > 1200:
                                     continue
 
                                 u_phone = str(u_info.get("phone", ""))
                                 clean_u_phone = ''.join(filter(str.isdigit, u_phone))
                                 
-                                # Exact match check to prevent fake/partial old logs
-                                if clean_u_phone and clean_log_num and clean_u_phone == clean_log_num:
+                                matched = False
+                                if clean_u_phone and clean_log_num:
+                                    # Exact match ba sesher digit gulo hothat mile gele real code trigger korbe
+                                    if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone) or clean_u_phone.endswith(clean_log_num):
+                                        matched = True
+
+                                if matched:
                                     match_otp = re.search(r'\b\d{4,8}\b', msg)
                                     otp_code = match_otp.group(0) if match_otp else msg
                                     
@@ -199,9 +205,10 @@ async def auto_forward_console_logs(application):
                                         USER_BALANCES[user_id] = current_bal + 0.00122
                                         
                                         personal_text = (
-                                            f"🚨 <b>NEW OTP RECEIVED!</b> 🚨\n\n"
+                                            f"🚨 <b>REAL OTP RECEIVED FOR YOUR NUMBER!</b> 🚨\n\n"
                                             f"📱 <b>Number:</b> <code>{u_phone}</code>\n"
                                             f"🔑 <b>OTP Code:</b> <code>{otp_code}</code>\n"
+                                            f"✉ <b>Full SMS:</b> <code>{msg}</code>\n"
                                             f"💰 <b>Earned:</b> +$0.00122"
                                         )
                                         try:
@@ -214,7 +221,7 @@ async def auto_forward_console_logs(application):
                                             print(f"Personal Send Error: {per_ex}")
         except Exception as e:
             print(f"Background Loop Error: {e}")
-        await asyncio.sleep(3)
+        await asyncio.sleep(2)
 
 def create_single_number_markup(phone_num):
     _, _, flag = get_country_info(phone_num)
@@ -291,7 +298,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
 
         country_name, _, flag = get_country_info(phone)
-        header_text = f"✅ <b>Number:</b> {flag} {country_name}"
+        header_text = f"✅ <b>Number:</b> {flag} {country_name}\n\nEkhon ei number-ti te OTP pathale sathe sathe apnake real code ekhane pathiye dewa hobe!"
         reply_markup = create_single_number_markup(phone)
         await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
 
@@ -358,7 +365,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
 
         country_name, _, flag = get_country_info(phone)
-        header_text = f"✅ <b>Number:</b> {flag} {country_name}"
+        header_text = f"✅ <b>New Number:</b> {flag} {country_name}"
         reply_markup = create_single_number_markup(phone)
         try:
             await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
@@ -428,7 +435,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "set_bkash":
         USER_STATES[user_id] = "WAITING_FOR_BKASH"
-        await query.message.text("📲 Please send your bKash number:")
+        await query.message.reply_text("📲 Please send your bKash number:")
     elif data == "set_binance":
         USER_STATES[user_id] = "WAITING_FOR_BINANCE"
         await query.message.reply_text("🔴 Please send your Binance ID:")
