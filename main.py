@@ -101,9 +101,30 @@ def _sync_fetch_live_traffic_detailed():
 async def fetch_live_traffic_detailed():
     return await asyncio.to_thread(_sync_fetch_live_traffic_detailed)
 
+def get_existing_otps_for_number(phone):
+    existing_otps = set()
+    try:
+        headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
+        res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
+        if res.status_code == 200:
+            hits = res.json().get("data", [])
+            clean_phone_digits = ''.join(filter(str.isdigit, str(phone)))
+            if isinstance(hits, list):
+                for hit in hits:
+                    if not isinstance(hit, dict): continue
+                    h_num = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("range", ""))
+                    clean_h_digits = ''.join(filter(str.isdigit, h_num))
+                    if clean_phone_digits and clean_h_digits and (clean_phone_digits in clean_h_digits or clean_h_digits in clean_phone_digits):
+                        msg = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or ""
+                        match_otp = re.search(r'\b\d{4,8}\b', msg)
+                        otp_code = match_otp.group(0) if match_otp else msg
+                        existing_otps.add(otp_code)
+    except Exception as e:
+        print(f"Error fetching existing OTPs: {e}")
+    return existing_otps
+
 async def auto_forward_console_logs(application):
     await asyncio.sleep(5)
-    # Bot start howar ager sob purono log id gulo initially record kore rakha jacche jate purono msg send na hoy
     try:
         headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
         res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
@@ -179,14 +200,12 @@ async def auto_forward_console_logs(application):
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 u_phone = str(u_info.get("phone", ""))
                                 clean_u_phone = ''.join(filter(str.isdigit, u_phone))
-                                assigned_time = u_info.get("assigned_time", 0)
                                 
                                 matched = False
                                 if clean_u_phone and clean_log_num:
                                     if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone) or clean_u_phone in clean_log_num or clean_log_num in clean_u_phone:
                                         matched = True
                                 
-                                # Shudhu number neyar porer notun OTP gulo pathanor jonno check
                                 if matched:
                                     match_otp = re.search(r'\b\d{4,8}\b', msg)
                                     otp_code = match_otp.group(0) if match_otp else msg
@@ -282,12 +301,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ No stock available for range <code>{user_range}</code>.", parse_mode="HTML")
             return
 
-        import time
+        # Purono ba age theke thaka OTP gulo ignore korar jonno pre-load kora hocche
+        existing_otps = await asyncio.to_thread(get_existing_otps_for_number, phone)
+
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": update.effective_chat.id,
-            "assigned_time": time.time(),
-            "sent_otps": set()
+            "sent_otps": existing_otps
         }
 
         country_name, _, flag = get_country_info(phone)
@@ -350,12 +370,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer(f"❌ No stock available for range {user_range}.", show_alert=True)
             return
 
-        import time
+        existing_otps = await asyncio.to_thread(get_existing_otps_for_number, phone)
+
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": query.message.chat_id,
-            "assigned_time": time.time(),
-            "sent_otps": set()
+            "sent_otps": existing_otps
         }
 
         country_name, _, flag = get_country_info(phone)
