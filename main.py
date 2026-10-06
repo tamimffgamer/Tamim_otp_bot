@@ -102,33 +102,6 @@ def _sync_fetch_live_traffic_detailed():
 async def fetch_live_traffic_detailed():
     return await asyncio.to_thread(_sync_fetch_live_traffic_detailed)
 
-def _sync_get_existing_otps(phone):
-    existing_set = set()
-    try:
-        headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
-        res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
-        if res.status_code == 200:
-            hits = res.json().get("data", [])
-            clean_phone_digits = ''.join(filter(str.isdigit, str(phone)))
-            if isinstance(hits, list):
-                for hit in hits:
-                    if not isinstance(hit, dict): continue
-                    h_num = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("phone_number") or hit.get("mobile") or hit.get("receiver") or hit.get("to") or hit.get("range", ""))
-                    clean_h_digits = ''.join(filter(str.isdigit, h_num))
-                    if clean_phone_digits and clean_h_digits and (clean_phone_digits in clean_h_digits or clean_h_digits in clean_phone_digits):
-                        msg = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or ""
-                        match_otp = re.search(r'\b\d{4,8}\b', msg)
-                        otp_code = match_otp.group(0) if match_otp else msg
-                        existing_set.add(otp_code)
-                        # Also add full message string to global seen ids so group forwarding ignores it too if needed
-                        SEEN_OTP_IDS.add(f"{h_num}_{msg}")
-    except Exception as e:
-        print(f"Fetch Existing OTP Error: {e}")
-    return existing_set
-
-async def get_existing_otps_for_number(phone):
-    return await asyncio.to_thread(_sync_get_existing_otps, phone)
-
 async def auto_forward_console_logs(application):
     await asyncio.sleep(3)
     try:
@@ -154,7 +127,7 @@ async def auto_forward_console_logs(application):
                 res_json = res.json()
                 hits = res_json.get("data", [])
                 if isinstance(hits, list):
-                    current_time = time.time()
+                    current_loop_time = time.time()
                     for hit in hits:
                         if not isinstance(hit, dict): continue
 
@@ -206,7 +179,11 @@ async def auto_forward_console_logs(application):
                             
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 req_time = u_info.get("req_time", 0)
-                                if current_time - req_time < 2: 
+                                
+                                # CRITICAL FIX: Ignore any message whose timestamp/existence predates the user requesting this number
+                                if hit.get("time") and str(hit.get("time")) < str(u_info.get("req_formatted_time", "")):
+                                    continue
+                                if current_loop_time - req_time < 1: 
                                     continue
 
                                 u_phone = str(u_info.get("phone", ""))
@@ -312,14 +289,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ No stock available for range <code>{user_range}</code>.", parse_mode="HTML")
             return
 
-        # Pre-fetch existing messages for this phone and ignore them instantly
-        existing_otps = await get_existing_otps_for_number(phone)
+        current_formatted_time = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
 
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": update.effective_chat.id,
             "req_time": time.time(),
-            "sent_otps": existing_otps
+            "req_formatted_time": current_formatted_time,
+            "sent_otps": set()
         }
 
         country_name, _, flag = get_country_info(phone)
@@ -382,13 +359,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer(f"❌ No stock available for range {user_range}.", show_alert=True)
             return
 
-        existing_otps = await get_existing_otps_for_number(phone)
+        current_formatted_time = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
 
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": query.message.chat_id,
             "req_time": time.time(),
-            "sent_otps": existing_otps
+            "req_formatted_time": current_formatted_time,
+            "sent_otps": set()
         }
 
         country_name, _, flag = get_country_info(phone)
@@ -415,7 +393,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="tr_main")])
         markup = InlineKeyboardMarkup(keyboard)
-        try: await query.edit_number_text if hasattr(query, 'edit_number_text') else query.edit_message_text(f"👑 <b>Explore Service:</b> 🌐 {sid}\n\nSelect a country:", reply_markup=markup, parse_mode="HTML")
+        try: await query.edit_message_text(f"👑 <b>Explore Service:</b> 🌐 {sid}\n\nSelect a country:", reply_markup=markup, parse_mode="HTML")
         except: pass
 
     elif data.startswith("tr_cnt_"):
