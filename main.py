@@ -44,9 +44,9 @@ def _sync_get_real_number(target_range):
         res = requests.post(f"{BASE_API_URL}/getnumber.php", headers=headers, json=payload, timeout=5)
         if res.status_code == 200:
             res_data = res.json()
-            data = res_data.get("data", {})
-            phone = data.get("full_number") or data.get("national_number") or data.get("phone") or data.get("number")
-            order_id = res_data.get("id") or data.get("id") or res_data.get("rid") or clean_rid
+            # Handle Mino SMS /getnumber.php structure from docs
+            phone = res_data.get("number") or res_data.get("data", {}).get("full_number") or res_data.get("data", {}).get("number")
+            order_id = res_data.get("id") or res_data.get("data", {}).get("id") or clean_rid
             if phone:
                 return str(phone), str(order_id)
     except Exception as e:
@@ -88,7 +88,6 @@ async def fetch_live_traffic_from_panel():
 def _sync_check_otp(target_phone, order_id):
     headers = {"mauthapi": API_KEY, "Accept": "application/json"}
     clean_target = ''.join(filter(str.isdigit, str(target_phone)))
-    short_target = clean_target[-6:] if len(clean_target) >= 6 else clean_target
     
     try:
         res = requests.get(f"{BASE_API_URL}/check.php?api_key={API_KEY}&number=+{clean_target}", headers=headers, timeout=3)
@@ -102,7 +101,7 @@ def _sync_check_otp(target_phone, order_id):
                     msg = str(otp_item.get("message", ""))
                     clean_num = ''.join(filter(str.isdigit, num_raw))
                     
-                    if short_target in clean_num or (clean_target and clean_target in clean_num):
+                    if clean_target in clean_num:
                         match = re.search(r'\b\d{4,8}\b', msg)
                         if match:
                             return match.group(0)
@@ -125,7 +124,7 @@ async def auto_forward_console_logs(application):
                     res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=5)
                     if res.status_code == 200:
                         res_json = res.json()
-                        return res_json.get("data", {}).get("hits", []) or []
+                        return res_json.get("data", {}).get("hits", []) or res_json.get("hits", []) or []
                 except Exception as ex:
                     print(f"Auto Forward Fetch Error: {ex}")
                 return []
@@ -133,7 +132,7 @@ async def auto_forward_console_logs(application):
             hits = await asyncio.to_thread(fetch_console_hits)
             for hit in hits:
                 if not isinstance(hit, dict): continue
-                r = hit.get("range", "")
+                r = hit.get("range", "") or hit.get("number", "")
                 sid = hit.get("sid", "FACEBOOK")
                 msg = hit.get("message", "N/A").replace("<", "&lt;").replace(">", "&gt;")
                 t_stamp = hit.get("time", "")
