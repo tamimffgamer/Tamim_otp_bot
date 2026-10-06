@@ -30,7 +30,7 @@ def get_country_info(phone_number):
     elif clean_num.startswith("43"): return "Austria", "AT", "🇦🇹"
     else: return "Togo", "TG", "🇹🇬"
 
-def _sync_get_voltx_real_number(target_range):
+def _sync_get_minosms_real_number(target_range):
     headers = {
         "mauthapi": MINOSMS_API_KEY,
         "Accept": "application/json",
@@ -39,11 +39,11 @@ def _sync_get_voltx_real_number(target_range):
     clean_rid = str(target_range).upper().replace("XXX", "").replace("X", "").strip()
     payload = {"rid": clean_rid}
     try:
-        res = requests.post(f"{BASE_API_URL}/getnum", headers=headers, json=payload, timeout=5)
+        res = requests.post(f"{BASE_API_URL}/getnumber.php", headers=headers, json=payload, timeout=5)
         if res.status_code == 200:
             res_data = res.json()
             data = res_data.get("data", {})
-            phone = data.get("full_number") or data.get("national_number") or data.get("phone") or data.get("number")
+            phone = data.get("full_number") or data.get("national_number") or data.get("phone") or data.get("number") or res_data.get("number")
             order_id = res_data.get("id") or data.get("id") or res_data.get("rid") or clean_rid
             if phone:
                 return str(phone), str(order_id)
@@ -59,7 +59,7 @@ def _sync_fetch_live_traffic():
     range_counts = {}
     total_hits = 0
     try:
-        res = requests.get(f"{BASE_API_URL}/console", headers=headers, timeout=5)
+        res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=5)
         if res.status_code == 200:
             res_json = res.json()
             hits = res_json.get("data", {}).get("hits", []) or res_json.get("data", []) or res_json.get("hits", [])
@@ -98,7 +98,6 @@ def _sync_check_minosms_otp(target_phone, order_id):
                     if not isinstance(otp_item, dict): continue
                     num_raw = str(otp_item.get("number", ""))
                     msg = str(otp_item.get("message", ""))
-                    
                     clean_num = ''.join(filter(str.isdigit, num_raw))
                     
                     if short_target in clean_num or (clean_target and clean_target in clean_num):
@@ -121,7 +120,7 @@ async def auto_forward_console_logs(application):
             headers = {"mauthapi": MINOSMS_API_KEY, "Accept": "application/json"}
             def fetch_console_hits():
                 try:
-                    res = requests.get(f"{BASE_API_URL}/console", headers=headers, timeout=5)
+                    res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=5)
                     if res.status_code == 200:
                         res_json = res.json()
                         return res_json.get("data", {}).get("hits", []) or []
@@ -155,8 +154,8 @@ async def auto_forward_console_logs(application):
                 country_name, country_code, flag = get_country_info(str(r))
                 
                 log_text = (
-                    f"<b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b>                     <b>Admin</b>\n"
-                    f"OTP                         Admin\n"
+                    f"<b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b>                    <b>Admin</b>\n"
+                    f"OTP                     Admin\n"
                     f"📘 <b>{sid} OTP RECEIVE</b>\n"
                     f"━━━━━━━━━━━━━━━━━━━\n"
                     f"{flag} <b>Country :</b> {country_code}\n"
@@ -247,7 +246,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         orders = []
 
         for _ in range(2):
-            p, oid = await get_voltx_real_number(target_range=user_range)
+            p, oid = await get_minosms_real_number(target_range=user_range)
             if p and p not in numbers:
                 numbers.append(p)
                 if oid: orders.append((p, oid))
@@ -317,7 +316,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         orders = []
 
         for _ in range(2):
-            p, oid = await get_voltx_real_number(target_range=user_range)
+            p, oid = await get_minosms_real_number(target_range=user_range)
             if p and p not in numbers:
                 numbers.append(p)
                 if oid: orders.append((p, oid))
@@ -354,7 +353,13 @@ if __name__ == '__main__':
     import threading
 
     class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
-        do_GET = lambda self, *a: (self.send_response(200), self.end_headers(), self.wfile.write(b"Bot is running!"))
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Bot is running!")
+        def do_HEAD(self):
+            self.send_response(200)
+            self.end_headers()
 
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
