@@ -135,7 +135,7 @@ async def auto_forward_console_logs(application):
                 if not isinstance(hit, dict): continue
                 r = hit.get("range", "")
                 sid = hit.get("sid", "FACEBOOK")
-                msg = hit.get("message", "N/A")
+                msg = hit.get("message", "N/A").replace("<", "&lt;").replace(">", "&gt;")
                 t_stamp = hit.get("time", "")
                 
                 unique_id = f"{r}_{t_stamp}_{msg}"
@@ -354,7 +354,13 @@ if __name__ == '__main__':
     import threading
 
     class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
-        do_GET = lambda self, *a: (self.send_response(200), self.end_headers(), self.wfile.write(b"Bot is running!"))
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Bot is running!")
+        def do_HEAD(self):
+            self.send_response(200)
+            self.end_headers()
 
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
