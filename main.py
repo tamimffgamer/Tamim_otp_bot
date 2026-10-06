@@ -148,14 +148,16 @@ async def auto_forward_console_logs(application):
                             except Exception as ex:
                                 print(f"Group Forward Error: {ex}")
 
+                            # Number clean kore digit-gulo alada kora hocche accurate matching er jonno
                             clean_log_num = ''.join(filter(str.isdigit, num))
                             
-                            # STRICT EXACT MATCH: Personal chat-e shudhumatro user-er neya exact number match korlei ashbe
+                            # Personal chat-e shudhumatro user-er neya exact number match korlei ashbe
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
-                                u_phone = ''.join(filter(str.isdigit, str(u_info.get("phone", ""))))
+                                u_phone = str(u_info.get("phone", ""))
+                                clean_u_phone = ''.join(filter(str.isdigit, u_phone))
                                 
-                                # Check jodi log-er number ebong user-er exact phone number purapuri ekoy hoy (kono range ba mismatch thakbe na)
-                                if u_phone and clean_log_num and u_phone == clean_log_num:
+                                # Jodi user er number ebong log er number e mile jay
+                                if clean_u_phone and clean_log_num and (clean_u_phone in clean_log_num or clean_log_num in clean_u_phone):
                                     match_otp = re.search(r'\b\d{4,8}\b', msg)
                                     otp_code = match_otp.group(0) if match_otp else msg
                                     
