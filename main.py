@@ -103,6 +103,22 @@ async def fetch_live_traffic_detailed():
 
 async def auto_forward_console_logs(application):
     await asyncio.sleep(5)
+    # Bot start howar ager sob purono log id gulo initially record kore rakha jacche jate purono msg send na hoy
+    try:
+        headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
+        res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
+        if res.status_code == 200:
+            res_json = res.json()
+            hits = res_json.get("data", [])
+            if isinstance(hits, list):
+                for hit in hits:
+                    if isinstance(hit, dict):
+                        m = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or ""
+                        n = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("phone_number") or hit.get("mobile") or hit.get("receiver") or hit.get("to") or hit.get("range", ""))
+                        SEEN_OTP_IDS.add(f"{n}_{m}")
+    except Exception as e:
+        print(f"Init Seen Error: {e}")
+
     while True:
         try:
             headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
@@ -131,12 +147,11 @@ async def auto_forward_console_logs(application):
                         log_id = f"{num}_{msg}"
                         if log_id not in SEEN_OTP_IDS:
                             SEEN_OTP_IDS.add(log_id)
-                            if len(SEEN_OTP_IDS) > 500:
+                            if len(SEEN_OTP_IDS) > 1000:
                                 SEEN_OTP_IDS.pop()
                             
                             _, _, flag = get_country_info(num, country)
                             
-                            # পাবলিক গ্রুপে সব ওটিপি পাঠানোর জন্য
                             group_text = (
                                 f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
                                 f"📘 <b>{service} OTP RECEIVE</b>\n\n"
@@ -161,16 +176,17 @@ async def auto_forward_console_logs(application):
 
                             clean_log_num = ''.join(filter(str.isdigit, num))
                             
-                            # ইউজারের নাম্বারের সাথে মিল রেখে পার্সোনাল ইনবক্সে পাঠানো
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 u_phone = str(u_info.get("phone", ""))
                                 clean_u_phone = ''.join(filter(str.isdigit, u_phone))
+                                assigned_time = u_info.get("assigned_time", 0)
                                 
                                 matched = False
                                 if clean_u_phone and clean_log_num:
                                     if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone) or clean_u_phone in clean_log_num or clean_log_num in clean_u_phone:
                                         matched = True
                                 
+                                # Shudhu number neyar porer notun OTP gulo pathanor jonno check
                                 if matched:
                                     match_otp = re.search(r'\b\d{4,8}\b', msg)
                                     otp_code = match_otp.group(0) if match_otp else msg
@@ -197,7 +213,7 @@ async def auto_forward_console_logs(application):
                                             print(f"Personal Send Error: {per_ex}")
         except Exception as e:
             print(f"Background Loop Error: {e}")
-        await asyncio.sleep(6)
+        await asyncio.sleep(4)
 
 def create_single_number_markup(phone_num):
     _, _, flag = get_country_info(phone_num)
@@ -266,9 +282,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ No stock available for range <code>{user_range}</code>.", parse_mode="HTML")
             return
 
+        import time
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": update.effective_chat.id,
+            "assigned_time": time.time(),
             "sent_otps": set()
         }
 
@@ -332,9 +350,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer(f"❌ No stock available for range {user_range}.", show_alert=True)
             return
 
+        import time
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": query.message.chat_id,
+            "assigned_time": time.time(),
             "sent_otps": set()
         }
 
