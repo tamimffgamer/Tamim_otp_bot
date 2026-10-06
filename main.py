@@ -28,7 +28,7 @@ def get_country_info(phone_number, api_country=""):
         if "madagascar" in c_lower: return "Madagascar", "MG", "🇲🇬"
         elif "ivory" in c_lower or "côte" in c_lower: return "Ivory Coast", "CI", "🇨🇮"
         elif "cameroon" in c_lower: return "Cameroon", "CM", "🇨🇲"
-        elif "togo" in c_lower: return "Togo", "TG", "🇹🇬"
+        elif "togo" in c_lower: return "Togo", "TG", "TG"
         elif "benin" in c_lower: return "Benin", "BJ", "🇧🇯"
         elif "tanzania" in c_lower: return "Tanzania", "TZ", "🇹🇿"
         elif "ukraine" in c_lower: return "Ukraine", "UA", "🇺🇦"
@@ -50,7 +50,7 @@ def _sync_get_mino_real_number(target_range):
     clean_rid = str(target_range).upper().strip()
     payload = {"rid": clean_rid}
     try:
-        res = requests.post(f"{BASE_API_URL}/getnumber.php", headers=headers, json=payload, timeout=3.0)
+        res = requests.post(f"{BASE_API_URL}/getnumber.php", headers=headers, json=payload, timeout=5.0)
         if res.status_code == 200:
             res_data = res.json()
             data = res_data.get("data", {})
@@ -69,7 +69,7 @@ def _sync_fetch_live_traffic_detailed():
     service_data = {}
     total_hits = 0
     try:
-        res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
+        res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=5.0)
         if res.status_code == 200:
             res_json = res.json()
             hits = res_json.get("data", [])
@@ -104,9 +104,10 @@ async def fetch_live_traffic_detailed():
 
 async def auto_forward_console_logs(application):
     await asyncio.sleep(2)
+    # Startup e purono logs gulo seen set e add kore dewa hocche jate bot start howar sathe sathe purono message group-e spam na kore
     try:
         headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
-        res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
+        res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=5.0)
         if res.status_code == 200:
             res_json = res.json()
             hits = res_json.get("data", [])
@@ -114,7 +115,11 @@ async def auto_forward_console_logs(application):
                 for hit in hits:
                     if isinstance(hit, dict):
                         m = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or ""
-                        n = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("phone_number") or hit.get("mobile") or hit.get("receiver") or hit.get("to") or hit.get("range", ""))
+                        n = str(
+                            hit.get("number") or hit.get("full_number") or hit.get("phone") or 
+                            hit.get("phone_number") or hit.get("mobile") or hit.get("receiver") or 
+                            hit.get("to") or hit.get("range", "")
+                        )
                         SEEN_OTP_IDS.add(f"{n}_{m}")
     except Exception as e:
         print(f"Init Seen Error: {e}")
@@ -122,7 +127,7 @@ async def auto_forward_console_logs(application):
     while True:
         try:
             headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
-            res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
+            res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=5.0)
             if res.status_code == 200:
                 res_json = res.json()
                 hits = res_json.get("data", [])
@@ -148,8 +153,10 @@ async def auto_forward_console_logs(application):
                         log_id = f"{num}_{msg}"
                         if log_id not in SEEN_OTP_IDS:
                             SEEN_OTP_IDS.add(log_id)
-                            if len(SEEN_OTP_IDS) > 3000:
+                            if len(SEEN_OTP_IDS) > 4000:
                                 SEEN_OTP_IDS.pop()
+                            
+                            print(f"DEBUG HIT: Number={num} | Msg={msg}")
                             
                             _, _, flag = get_country_info(num, country)
                             
@@ -177,12 +184,11 @@ async def auto_forward_console_logs(application):
 
                             clean_log_num = ''.join(filter(str.isdigit, num))
                             
-                            # Ebar shudhu matro oi user-er neya specific active number-er sathe strict match korano hocche
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 req_time = u_info.get("req_time", 0)
                                 
-                                # Number neyar por 20 minutes (1200 seconds) er moddhe asha message gulo-i consider hobe
-                                if current_loop_time < req_time or (current_loop_time - req_time) > 1200:
+                                # 30 minutes (1800 seconds) er moddhe asha message consider hobe
+                                if current_loop_time < req_time or (current_loop_time - req_time) > 1800:
                                     continue
 
                                 u_phone = str(u_info.get("phone", ""))
@@ -190,8 +196,10 @@ async def auto_forward_console_logs(application):
                                 
                                 matched = False
                                 if clean_u_phone and clean_log_num:
-                                    # Exact match ba sesher digit gulo hothat mile gele real code trigger korbe
-                                    if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone) or clean_u_phone.endswith(clean_log_num):
+                                    if (clean_u_phone == clean_log_num or 
+                                        clean_log_num.endswith(clean_u_phone) or 
+                                        clean_u_phone.endswith(clean_log_num) or
+                                        (len(clean_u_phone) >= 7 and clean_u_phone[-7:] == clean_log_num[-7:])):
                                         matched = True
 
                                 if matched:
@@ -473,3 +481,4 @@ if __name__ == '__main__':
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
     app.run_polling()
+
