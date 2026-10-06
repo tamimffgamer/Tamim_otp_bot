@@ -114,13 +114,15 @@ async def auto_forward_console_logs(application):
                     for hit in hits:
                         if not isinstance(hit, dict): continue
 
-                        msg = hit.get("message") or hit.get("text") or hit.get("sms") or ""
+                        msg = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or ""
                         num = str(
                             hit.get("number") or 
                             hit.get("full_number") or 
                             hit.get("phone") or 
                             hit.get("phone_number") or 
                             hit.get("mobile") or 
+                            hit.get("receiver") or
+                            hit.get("to") or
                             hit.get("range", "")
                         )
                         service = hit.get("service", "SMS")
@@ -134,7 +136,7 @@ async def auto_forward_console_logs(application):
                             
                             _, _, flag = get_country_info(num, country)
                             
-                            # পাবলিক গ্রুপে সব ওটিপি যাবে
+                            # পাবলিক গ্রুপে সব ওটিপি পাঠানোর জন্য
                             group_text = (
                                 f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
                                 f"📘 <b>{service} OTP RECEIVE</b>\n\n"
@@ -144,7 +146,7 @@ async def auto_forward_console_logs(application):
                                 f"✉ <b>Message :</b>\n<code>{msg}</code>"
                             )
                             group_markup = InlineKeyboardMarkup([
-                                [InlineKeyboardButton("NUMBER BOT ↗", url="https://t.me/tamim_otp_bot")]
+                                [InlineKeyboardButton("NUMBER BOT ↗", url=f"https://t.me/{application.bot.username}")]
                             ])
                             
                             try:
@@ -159,14 +161,14 @@ async def auto_forward_console_logs(application):
 
                             clean_log_num = ''.join(filter(str.isdigit, num))
                             
-                            # শুধুমাত্র যার নাম্বারে ওটিপি এসেছে, তার পার্সোনাল ইনবক্সেই শুধু পাঠানো হবে
+                            # ইউজারের নাম্বারের সাথে মিল রেখে পার্সোনাল ইনবক্সে পাঠানো
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 u_phone = str(u_info.get("phone", ""))
                                 clean_u_phone = ''.join(filter(str.isdigit, u_phone))
                                 
                                 matched = False
                                 if clean_u_phone and clean_log_num:
-                                    if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone) or clean_u_phone.endswith(clean_log_num):
+                                    if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone) or clean_u_phone in clean_log_num or clean_log_num in clean_u_phone:
                                         matched = True
                                 
                                 if matched:
@@ -385,7 +387,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         keyboard.append([InlineKeyboardButton("🔙 Back", callback_data=f"tr_svc_{sid}")])
         markup = InlineKeyboardMarkup(keyboard)
-        try: await query.edit_message_text(f"👑 <b>Ranges for</b> 🌐 {sid} - {c_data['flag']} <b>{c_code}</b>\n\nClick range to copy:", reply_markup=markup, parse_mode="HTML")
+        try:
+            await query.edit_message_text(f"👑 <b>Ranges for</b> 🌐 {sid} - {c_data['flag']} <b>{c_code}</b>\n\nClick range to copy:", reply_markup=markup, parse_mode="HTML")
         except: pass
 
     elif data == "tr_main" or data == "tr_refresh":
@@ -432,7 +435,12 @@ if __name__ == '__main__':
     import threading
 
     class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
-        do_GET = lambda self, *a: (self.send_response(200), self.end_headers(), self.wfile.write(b"Bot is running!"))
+        def do_GET(self, *a):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Bot is running!")
+        def do_HEAD(self, *a):
+            self.do_GET(*a)
 
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
