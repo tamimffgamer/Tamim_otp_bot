@@ -7,9 +7,9 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# Updated with your Mino SMS API details
-API_KEY = "mino_live_a5db48f1d607f390b0d3bd1fccfcd17[span_4](start_span)"[span_4](end_span)
-BASE_API_URL = "https://minosms.com[span_5](start_span)"[span_5](end_span)
+# Mino SMS API details
+API_KEY = "mino_live_a5db48f1d607f390b0d3bd1fccfcd17"
+BASE_API_URL = "https://minosms.com"
 
 YOUR_TELEGRAM_USERNAME = "smm_otp_grup"
 OTP_GROUP_CHAT_ID = -1004436883235
@@ -41,7 +41,7 @@ def _sync_get_real_number(target_range):
     clean_rid = str(target_range).upper().strip()
     payload = {"rid": clean_rid}
     try:
-        res = requests.post(f"{BASE_API_URL}/getnumber.php", headers=headers, json=payload, timeout=5)[span_6](start_span)[span_6](end_span)
+        res = requests.post(f"{BASE_API_URL}/getnumber.php", headers=headers, json=payload, timeout=5)
         if res.status_code == 200:
             res_data = res.json()
             data = res_data.get("data", {})
@@ -91,7 +91,7 @@ def _sync_check_otp(target_phone, order_id):
     short_target = clean_target[-6:] if len(clean_target) >= 6 else clean_target
     
     try:
-        res = requests.get(f"{BASE_API_URL}/check.php?api_key={API_KEY}&number=+{clean_target}", headers=headers, timeout=3)[span_7](start_span)[span_7](end_span)
+        res = requests.get(f"{BASE_API_URL}/check.php?api_key={API_KEY}&number=+{clean_target}", headers=headers, timeout=3)
         if res.status_code == 200:
             res_json = res.json()
             otps = res_json.get("data", {}).get("otps", []) or res_json.get("otps", []) or []
