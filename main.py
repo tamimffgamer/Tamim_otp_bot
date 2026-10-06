@@ -37,7 +37,7 @@ def get_country_info(phone_number, api_country=""):
     if clean_num.startswith("880"): return "Bangladesh", "BD", "🇧🇩"
     elif clean_num.startswith("237"): return "Cameroon", "CM", "🇨🇲"
     elif clean_num.startswith("225"): return "Ivory Coast", "CI", "🇨🇮"
-    elif clean_num.startswith("228"): return "Togo", "TG", "🇹🇬"
+    elif clean_num.startswith("228"): return "Togo", "TG", "TG"
     elif clean_num.startswith("261"): return "Madagascar", "MG", "🇲🇬"
     else: return "International", "INT", "🌍"
 
@@ -180,23 +180,15 @@ async def auto_forward_console_logs(application):
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 req_time = u_info.get("req_time", 0)
                                 
-                                # FIX: Number neyar por theke shudhu matro 20 min (1200 seconds) er moddhe asha code-i allow korbe
-                                if current_loop_time - req_time > 1200:
-                                    continue
-                                
-                                # Ignore messages generated before the user requested the number
-                                if current_loop_time - req_time < 3:
+                                # STRICT CHECK: User number neyar aagerta ba 20 minutes (1200s) porer message baad debe
+                                if current_loop_time < req_time or (current_loop_time - req_time) > 1200:
                                     continue
 
                                 u_phone = str(u_info.get("phone", ""))
                                 clean_u_phone = ''.join(filter(str.isdigit, u_phone))
                                 
-                                matched = False
-                                if clean_u_phone and clean_log_num:
-                                    if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone) or clean_u_phone in clean_log_num or clean_log_num in clean_u_phone:
-                                        matched = True
-                                
-                                if matched:
+                                # Exact match check to prevent fake/partial old logs
+                                if clean_u_phone and clean_log_num and clean_u_phone == clean_log_num:
                                     match_otp = re.search(r'\b\d{4,8}\b', msg)
                                     otp_code = match_otp.group(0) if match_otp else msg
                                     
@@ -436,7 +428,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "set_bkash":
         USER_STATES[user_id] = "WAITING_FOR_BKASH"
-        await query.message.reply_text("📲 Please send your bKash number:")
+        await query.message.text("📲 Please send your bKash number:")
     elif data == "set_binance":
         USER_STATES[user_id] = "WAITING_FOR_BINANCE"
         await query.message.reply_text("🔴 Please send your Binance ID:")
