@@ -18,7 +18,7 @@ USER_RANGES = {}
 USER_BALANCES = {}  
 USER_WITHDRAW_INFO = {} 
 SEEN_OTP_IDS = set()
-ACTIVE_USER_NUMBERS = {} # user_id -> {"phone": exact_phone, "chat_id": chat_id, "sent_otps": set()}
+ACTIVE_USER_NUMBERS = {} # user_id -> {"phones": [p1, p2], "chat_id": chat_id, "sent_otps": set()}
 
 def get_country_info(phone_number, api_country=""):
     clean_num = str(phone_number).replace("+", "").strip()
@@ -137,7 +137,6 @@ async def auto_forward_console_logs(application):
                                 [InlineKeyboardButton("NUMBER BOT ↗", url="https://t.me/tamim_otp_bot")]
                             ])
                             
-                            # Group-e shob log jabe
                             try:
                                 await application.bot.send_message(
                                     chat_id=OTP_GROUP_CHAT_ID, 
@@ -148,16 +147,18 @@ async def auto_forward_console_logs(application):
                             except Exception as ex:
                                 print(f"Group Forward Error: {ex}")
 
-                            # Number clean kore digit-gulo alada kora hocche accurate matching er jonno
                             clean_log_num = ''.join(filter(str.isdigit, num))
                             
-                            # Personal chat-e shudhumatro user-er neya exact number match korlei ashbe
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
-                                u_phone = str(u_info.get("phone", ""))
-                                clean_u_phone = ''.join(filter(str.isdigit, u_phone))
+                                u_phones = u_info.get("phones", [])
+                                matched = False
+                                for u_phone in u_phones:
+                                    clean_u_phone = ''.join(filter(str.isdigit, str(u_phone)))
+                                    if clean_u_phone and clean_log_num and (clean_u_phone in clean_log_num or clean_log_num in clean_u_phone):
+                                        matched = True
+                                        break
                                 
-                                # Jodi user er number ebong log er number e mile jay
-                                if clean_u_phone and clean_log_num and (clean_u_phone in clean_log_num or clean_log_num in clean_u_phone):
+                                if matched:
                                     match_otp = re.search(r'\b\d{4,8}\b', msg)
                                     otp_code = match_otp.group(0) if match_otp else msg
                                     
@@ -168,20 +169,15 @@ async def auto_forward_console_logs(application):
                                         USER_BALANCES[user_id] = current_bal + 0.00122
                                         
                                         personal_text = (
-                                            f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
                                             f"🚨 <b>NEW OTP RECEIVED!</b> 🚨\n\n"
                                             f"📱 <b>Number:</b> <code>{num}</code>\n"
-                                            f"🔑 <b>OTP Code/Message:</b> <code>{otp_code}</code>\n"
+                                            f"🔑 <b>OTP Code:</b> <code>{otp_code}</code>\n"
                                             f"💰 <b>Earned:</b> +$0.00122"
                                         )
-                                        personal_markup = InlineKeyboardMarkup([
-                                            [InlineKeyboardButton("NUMBER BOT ↗", url="https://t.me/tamim_otp_bot")]
-                                        ])
                                         try:
                                             await application.bot.send_message(
                                                 chat_id=u_info["chat_id"], 
                                                 text=personal_text, 
-                                                reply_markup=personal_markup, 
                                                 parse_mode="HTML"
                                             )
                                         except Exception as per_ex:
@@ -247,26 +243,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if "Get API Number" in text:
         USER_STATES[user_id] = None
-        wait_msg = await update.message.reply_text("⏳ Fetching real number from MINO panel...")
+        wait_msg = await update.message.reply_text("⏳ Fetching real numbers from MINO panel...")
         user_range = USER_RANGES.get(user_id, "23762XXX")
         
-        p, oid = await get_mino_real_number(target_range=user_range)
+        p1, _ = await get_mino_real_number(target_range=user_range)
+        p2, _ = await get_mino_real_number(target_range=user_range)
         try: await wait_msg.delete()
         except: pass
 
-        if not p:
+        if not p1 and not p2:
             await update.message.reply_text(f"❌ No stock for range <code>{user_range}</code>.", parse_mode="HTML")
             return
 
+        fetched_numbers = []
+        if p1: fetched_numbers.append(p1)
+        if p2 and p2 != p1: fetched_numbers.append(p2)
+
         ACTIVE_USER_NUMBERS[user_id] = {
-            "phone": p,
+            "phones": fetched_numbers,
             "chat_id": update.effective_chat.id,
             "sent_otps": set()
         }
 
-        country_name, _, flag = get_country_info(p)
+        country_name, _, flag = get_country_info(fetched_numbers[0])
         header_text = f"✅ <b>Number:</b> {flag} {country_name}"
-        reply_markup = create_number_markup([p])
+        reply_markup = create_number_markup(fetched_numbers)
         await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
 
     elif "Set Range" in text:
@@ -278,7 +279,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         service_data, total_hits = await fetch_live_traffic_detailed()
         
         if not service_data:
-            await update.message.reply_text("⚠️ No active traffic found right now.", parse_mode="HTML")
+            await update.message.reply_text("⚠️️ No active traffic found right now.", parse_mode="HTML")
             return
 
         keyboard = []
@@ -316,22 +317,28 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
 
     elif data == "change_number":
-        await query.answer("🔄 Fetching a new number...")
+        await query.answer("🔄 Fetching new numbers...")
         user_range = USER_RANGES.get(user_id, "23762XXX")
-        p, oid = await get_mino_real_number(target_range=user_range)
-        if not p:
+        p1, _ = await get_mino_real_number(target_range=user_range)
+        p2, _ = await get_mino_real_number(target_range=user_range)
+        
+        if not p1 and not p2:
             await query.answer(f"❌ No stock available for range {user_range}.", show_alert=True)
             return
 
+        fetched_numbers = []
+        if p1: fetched_numbers.append(p1)
+        if p2 and p2 != p1: fetched_numbers.append(p2)
+
         ACTIVE_USER_NUMBERS[user_id] = {
-            "phone": p,
+            "phones": fetched_numbers,
             "chat_id": query.message.chat_id,
             "sent_otps": set()
         }
 
-        country_name, _, flag = get_country_info(p)
+        country_name, _, flag = get_country_info(fetched_numbers[0])
         header_text = f"✅ <b>Number:</b> {flag} {country_name}"
-        reply_markup = create_number_markup([p])
+        reply_markup = create_number_markup(fetched_numbers)
         try:
             await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
         except:
