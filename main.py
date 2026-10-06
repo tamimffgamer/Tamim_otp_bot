@@ -76,7 +76,7 @@ def _sync_fetch_live_traffic_detailed():
                 total_hits = len(hits)
                 for hit in hits:
                     if not isinstance(hit, dict): continue
-                    r = hit.get("range")
+                    r = hit.get("range") or hit.get("number") or hit.get("full_number", "")
                     sid = str(hit.get("service", "FACEBOOK")).upper().strip()
                     api_country = hit.get("country", "")
                     
@@ -108,20 +108,26 @@ async def auto_forward_console_logs(application):
             headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
             res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
             if res.status_code == 200:
-                hits = res.json().get("data", [])
+                res_json = res.json()
+                hits = res_json.get("data", [])
                 if isinstance(hits, list):
                     for hit in hits:
                         if not isinstance(hit, dict): continue
-                        msg = hit.get("message", "")
-                        num = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("phone_number") or hit.get("range", ""))
-                        service = hit.get("service", "SMS")
-                        country = hit.get("country", "")
                         
-                        # ডিবাগ করার জন্য রেন্ডার লগে ডেটা প্রিন্ট করবে
-                        print(f"DEBUG HIT -> Num: {num}, Msg: {msg}")
+                        # রেন্ডার লগে পুরো হিট ডাটা প্রিন্ট করবে যাতে নিখুঁত দেখা যায়
+                        print(f"DEBUG HIT OBJECT: {hit}")
 
-                        if "X" in num.upper():
-                            continue
+                        msg = hit.get("message") or hit.get("text") or hit.get("sms") or ""
+                        num = str(
+                            hit.get("number") or 
+                            hit.get("full_number") or 
+                            hit.get("phone") or 
+                            hit.get("phone_number") or 
+                            hit.get("mobile") or 
+                            hit.get("range", "")
+                        )
+                        service = hit.get("service", "SMS")
+                        country = hit.get("country", "Cameroon")
 
                         log_id = f"{num}_{msg}"
                         if log_id not in SEEN_OTP_IDS:
@@ -135,7 +141,7 @@ async def auto_forward_console_logs(application):
                                 f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
                                 f"📘 <b>{service} OTP RECEIVE</b>\n\n"
                                 f"🌍 <b>Country :</b> {country} ({flag})\n"
-                                f"🎯 <b>Range :</b> <code>{num}</code>\n"
+                                f"🎯 <b>Number :</b> <code>{num}</code>\n"
                                 f"🗣 <b>Language :</b> English\n\n"
                                 f"✉ <b>Message :</b>\n<code>{msg}</code>"
                             )
@@ -190,7 +196,7 @@ async def auto_forward_console_logs(application):
                                             print(f"Personal Send Error: {per_ex}")
         except Exception as e:
             print(f"Background Loop Error: {e}")
-        await asyncio.sleep(8)
+        await asyncio.sleep(6)
 
 def create_single_number_markup(phone_num):
     _, _, flag = get_country_info(phone_num)
