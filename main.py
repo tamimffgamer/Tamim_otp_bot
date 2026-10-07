@@ -195,7 +195,6 @@ async def auto_forward_console_logs(application):
                             
                             matched = False
                             if clean_u_phone and clean_log_num:
-                                # প্যানেলের নাম্বার এবং ইউজারের নাম্বার যেকোনো একটি শেষের অংশ বা সম্পূর্ণ মিললে গ্রহণ করবে
                                 if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone) or clean_u_phone.endswith(clean_log_num):
                                     matched = True
 
@@ -300,7 +299,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
-            "chat_id": update.effective_chat.id,
+            "chat_id": update.effective_chat.ID,
             "req_time": time.time(),
             "sent_otps": set()
         }
