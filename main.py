@@ -15,7 +15,7 @@ from telegram.ext import (
 )
 
 # =========================================================
-# CONFIG
+# CONFIGURATION
 # =========================================================
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -28,8 +28,8 @@ OTP_GROUP_LINK = "https://t.me/smm_otp_grup"
 MINO_BASE_URL = "https://minosms.com"
 
 application = None
-user_ranges = {}        # User er nirdisto set kora range store korar jonno
-user_active_number = {} # User kon number-ti niyeche ta track korar jonno
+user_ranges = {}        # ইউজারের সেট করা রেঞ্জ সংরক্ষণ করার জন্য
+user_active_number = {} # ইউজার যে নাম্বারটি নিবে তা ট্র্যাক করার জন্য
 
 # =========================================================
 # LOGGING
@@ -57,7 +57,7 @@ def get_main_keyboard():
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 # =========================================================
-# BACKGROUND OTP CHECKER & ROUTING (GLOBAL & PERSONAL)
+# BACKGROUND OTP CHECKER (GLOBAL & PERSONAL ROUTING)
 # =========================================================
 
 async def check_mino_otp_loop():
@@ -65,6 +65,7 @@ async def check_mino_otp_loop():
     seen_otp_ids = set()
     while True:
         try:
+            # প্যানেল থেকে লাইভ এসএমএস বা ওটিপি চেক করার সঠিক এন্ডপয়েন্ট
             url = f"{MINO_BASE_URL}/st/api.php?api_key={MINO_API_KEY}&action=get_sms"
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=10) as response:
@@ -82,7 +83,7 @@ async def check_mino_otp_loop():
                                         number = str(sms.get("number", "Unknown")).strip()
                                         msg = sms.get("message", "No Message")
                                         
-                                        # 1. Global Group Notification (-1004436883235)
+                                        # ১. প্যানেলের সকল ওটিপি নির্দিষ্ট গ্রুপে পাঠানো (-1004436883235)
                                         global_text = (
                                             "🚨 **NEW OTP RECEIVED!** 🚨\n\n"
                                             "📱 **Panel:** MINO SMS PANEL\n"
@@ -99,7 +100,7 @@ async def check_mino_otp_loop():
                                         except Exception as e:
                                             logger.error(f"Global group notify error: {e}")
 
-                                        # 2. Personal Bot User Notification (Je user number niyeche takei shudu pathano)
+                                        # ২. বট থেকে যে ইউজার যে নাম্বারটি নিয়েছে, শুধু তার পার্সোনাল বটে রিয়েল OTP পাঠানো
                                         for uid, assigned_num in user_active_number.items():
                                             if assigned_num and assigned_num in number:
                                                 personal_text = (
@@ -130,7 +131,7 @@ flask_app = Flask(__name__)
 
 @flask_app.route("/")
 def home():
-    return "Bot is running successfully with Panel connection."
+    return "Bot is running successfully with Mino Panel connection."
 
 @flask_app.route("/health")
 def health():
@@ -170,7 +171,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         
         if not target_range or target_range == "Not Set":
             await update.message.reply_text(
-                "⚠️ **Range Set Kora Nei!**\nProthome '⚙️ Set Range' button-e click kore apnar target range (jemon: `88017XXX`) set kore nin.",
+                "⚠️ **Range Set Kora Nei!**\nপ্রথমে '⚙️ Set Range' বাটনে ক্লিক করে আপনার টার্গেট রেঞ্জ (যেমন: `23762XXX`) সেট করে নিন।",
                 parse_mode="Markdown",
                 reply_markup=get_main_keyboard()
             )
@@ -178,6 +179,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         fetched_number = "Loading from API..."
         try:
+            # প্যানেলের অফিশিয়াল డాকুমেন্টেশন অনুযায়ী POST মেথড ও মথ-এপিআই হেডার ব্যবহার করে নাম্বার ফেচ করা হচ্ছে
             url = f"{MINO_BASE_URL}/getnumber.php"
             headers = {"mauthapi": MINO_API_KEY}
             payload = {"rid": target_range}
@@ -193,7 +195,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.error(f"API fetch error: {e}")
             fetched_number = "API Connection Error"
 
-        # Save active number for tracking incoming personal OTPs
+        # ইউজারের এই নাম্বারটি পার스োনাল ট্র্যাকিংয়ের জন্য সংরক্ষণ করা হলো
         if fetched_number and "Error" not in fetched_number and "Loading" not in fetched_number:
             user_active_number[user_id] = str(fetched_number).strip()
 
@@ -206,17 +208,17 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             f"✅ **Panel Status:** Connected\n"
             f"📌 **Target Range:** `{target_range}`\n"
             f"📞 **Assigned Number:** `{fetched_number}`\n\n"
-            f"⚡ *Ei নাম্বারে নতুন OTP আসলে সরাসরি এখানে চলে আসবে!*", 
+            f"⚡ *এই নাম্বারে নতুন OTP আসলে সরাসরি আপনার এই ইনবক্সে চলে আসবে!*", 
             parse_mode="Markdown", 
             reply_markup=reply_markup
         )
 
     elif "Set Range" in text:
         context.user_data["waiting_for_range"] = True
-        await update.message.reply_text("🔴 Please send your target number range (e.g., `88017XXX`):", parse_mode="Markdown")
+        await update.message.reply_text("🔴 দয়া করে আপনার কাঙ্ক্ষিত নাম্বার রেঞ্জটি পাঠান (যেমন: `23762XXX`):", parse_mode="Markdown")
 
     elif "Live Traffic" in text:
-        # Fetching live traffic ranges sequentially/serially from panel
+        # প্যানেলের সকল রেঞ্জ ধারাবাহিক বা সিরিয়াল অনুযায়ী দেখানোর জন্য মেনু
         keyboard = [
             [InlineKeyboardButton("🌐 AUTHMSG (10 Ranges)", callback_data="cat_authmsg")],
             [InlineKeyboardButton("⚡ BOLT (1 Ranges)", callback_data="cat_bolt")],
@@ -231,7 +233,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            "📊 **Live Traffic Panel**\nSelect a service below to check active ranges sequentially:",
+            "📊 **Live Traffic Panel**\nপ্যানেলের সকল সক্রিয় রেঞ্জ ধারাবাহিক ও সিরিয়াল অনুযায়ী নিচে দেওয়া হলো:",
             parse_mode="Markdown",
             reply_markup=reply_markup
         )
@@ -242,8 +244,8 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            "💳 **Your Balance Details**\n\n"
-            "💰 **Current Rate:** প্রতি OTP ২০ পয়সা (৳০.২০)\n"
+            "💳 **Account Balance Details**\n\n"
+            "💰 **Rate:** প্রতি OTP ২০ পয়সা (৳০.২০)\n"
             "💼 **Available Balance:** ৳০.০০", 
             parse_mode="Markdown", 
             reply_markup=reply_markup
@@ -253,7 +255,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         keyboard = [[InlineKeyboardButton("💬 Support Agent", url=f"https://t.me/{SUPPORT_USERNAME}")]],
         reply_markup = InlineKeyboardMarkup(keyboard[0])
         await update.message.reply_text(
-            f"💬 **Support Center**\nKono somossa hole niche support button-e click kore সরাসরি যোগাযোগ করুন: @{SUPPORT_USERNAME}", 
+            f"💬 **Support Center**\nযেকোনো সমস্যায় সরাসরি যোগাযোগ করতে নিচের বাটনে ক্লিক করুন: @{SUPPORT_USERNAME}", 
             parse_mode="Markdown", 
             reply_markup=reply_markup
         )
@@ -262,7 +264,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         keyboard = [[InlineKeyboardButton("📢 Join OTP Group", url=OTP_GROUP_LINK)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            "📢 **Official OTP Group:**\nSober shathe connect thakte nicher button-e click kore join kore nin:", 
+            "📢 **Official OTP Group:**\nনিচের বাটনে ক্লিক করে অফিশিয়াল গ্রুপে জয়েন করুন:", 
             parse_mode="Markdown", 
             reply_markup=reply_markup
         )
@@ -273,7 +275,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     data = query.data
 
     if data == "back_home":
-        await query.message.edit_text("মূল মেনুতে ফিরে এসেছেন। নিচের মেনু ব্যবহার করুন।")
+        await query.message.edit_text("মূল মেনুতে ফিরে এসেছেন।")
     elif data == "change_num":
         await query.message.edit_text("🔄 নতুন নাম্বার লোড করার জন্য আবার 'Get API Number' এ ক্লিক করুন।")
     elif data == "refresh_traffic":
@@ -310,12 +312,11 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         else:
             ranges_text += (
                 f"1️⃣ 🟢 **Primary Server Range** | `Active Line`\n"
-                f"📌 Sequential ranges for {cat_name} are currently online and syncing with Mino SMS API."
+                f"📌 Sequential active ranges for {cat_name} are currently online."
             )
 
         await query.message.edit_text(
             ranges_text,
-            parse_package=True,
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔙 Back to Traffic", callback_data="back_to_traffic")]
@@ -335,7 +336,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             [InlineKeyboardButton("🔄 Refresh", callback_data="refresh_traffic"), InlineKeyboardButton("❌ Close", callback_data="close_menu")]
         ]
         await query.message.edit_text(
-            "📊 **Live Traffic Panel**\nSelect a service below to check active ranges sequentially:",
+            "📊 **Live Traffic Panel**\nপ্যানেলের সকল সক্রিয় রেঞ্জ ধারাবাহিক ও সিরিয়াল অনুযায়ী নিচে দেওয়া হলো:",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
