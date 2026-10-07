@@ -8,7 +8,8 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 MINOSMS_API_KEY = "mino_live_a5db48f1d607f390b0d3bd1fccfcd17"
 BASE_API_URL = "https://minosms.com"
-YOUR_TELEGRAM_USERNAME = "smm_otp_grup"
+SUPPORT_USERNAME = "tmtamimmia"
+OTP_GROUP_URL = "https://t.me/smm_otp_grup"
 OTP_GROUP_CHAT_ID = -1004436883235
 
 USER_STATES = {}
@@ -82,7 +83,7 @@ def _sync_fetch_live_traffic():
 async def fetch_live_traffic_from_panel():
     return await asyncio.to_thread(_sync_fetch_live_traffic)
 
-def _sync_check_minosms_otp(target_phone, order_id):
+def _sync_check_minosms_otp(target_phone):
     headers = {"mauthapi": MINOSMS_API_KEY, "Accept": "application/json"}
     clean_target = ''.join(filter(str.isdigit, str(target_phone)))
     short_target = clean_target[-6:] if len(clean_target) >= 6 else clean_target
@@ -91,7 +92,7 @@ def _sync_check_minosms_otp(target_phone, order_id):
         res = requests.get(f"{BASE_API_URL}/check.php?api_key={MINOSMS_API_KEY}&number=+{clean_target}", headers=headers, timeout=3)
         if res.status_code == 200:
             res_json = res.json()
-            otps = res_json.get("data", {}).get("otps", []) or []
+            otps = res_json.get("data", {}).get("otps", []) or res_json.get("data", []) or []
             if isinstance(otps, list):
                 for otp_item in otps:
                     if not isinstance(otp_item, dict): continue
@@ -110,11 +111,12 @@ def _sync_check_minosms_otp(target_phone, order_id):
         print(f"OTP Check Error: {e}")
     return None
 
-async def check_minosms_otp(target_phone, order_id):
-    return await asyncio.to_thread(_sync_check_minosms_otp, target_phone, order_id)
+async def check_minosms_otp(target_phone):
+    return await asyncio.to_thread(_sync_check_minosms_otp, target_phone)
 
 async def auto_forward_console_logs(application):
     await asyncio.sleep(5)
+    seen_local_hits = set()
     while True:
         try:
             headers = {"mauthapi": MINOSMS_API_KEY, "Accept": "application/json"}
@@ -138,12 +140,12 @@ async def auto_forward_console_logs(application):
                 t_stamp = hit.get("time", "")
                 
                 unique_id = f"{r}_{t_stamp}_{msg}"
-                if unique_id in SEEN_OTP_IDS:
+                if unique_id in seen_local_hits:
                     continue
                 
-                SEEN_OTP_IDS.add(unique_id)
-                if len(SEEN_OTP_IDS) > 500:
-                    SEEN_OTP_IDS.clear()
+                seen_local_hits.add(unique_id)
+                if len(seen_local_hits) > 500:
+                    seen_local_hits.clear()
 
                 clean_num = str(r)
                 if len(clean_num) > 6:
@@ -151,7 +153,7 @@ async def auto_forward_console_logs(application):
                 else:
                     masked_num = clean_num
 
-                country_name, country_code, flag = get_country_info(str(r))
+                _, country_code, flag = get_country_info(str(r))
                 
                 log_text = (
                     f"<b>MINOSMS PANEL LOGS</b>                     <b>Admin</b>\n"
@@ -167,7 +169,7 @@ async def auto_forward_console_logs(application):
                 )
                 
                 markup = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("NUMBER BOT ↗", url="https://t.me/Smmnumberbot")]
+                    [InlineKeyboardButton("NUMBER BOT ↗", url=OTP_GROUP_URL)]
                 ])
                 
                 try:
@@ -191,17 +193,17 @@ def create_number_markup(numbers_list):
         keyboard.append([InlineKeyboardButton(text=f"{flag} {num}", copy_text=CopyTextButton(text=num))])
     
     keyboard.append([
-        InlineKeyboardButton("🔔 OTP GROUP", url=f"https://t.me/{YOUR_TELEGRAM_USERNAME}"),
+        InlineKeyboardButton("🔔 OTP GROUP", url=OTP_GROUP_URL),
         InlineKeyboardButton("🔄 Change", callback_data="change_number")
     ])
     keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_home")])
     return InlineKeyboardMarkup(keyboard)
 
-async def poll_for_otp(chat_id, order_id, phone, context):
+async def poll_for_otp(chat_id, phone, context):
     for _ in range(300): 
         await asyncio.sleep(1) 
         try:
-            status = await check_minosms_otp(phone, order_id)
+            status = await check_minosms_otp(phone)
             if status:
                 otp_message = f"🚨 <b>NEW OTP RECEIVED!</b> 🚨\n\n📱 <b>Number:</b> <code>{phone}</code>\n🔑 <b>OTP Code:</b> <code>{status}</code>"
                 await context.bot.send_message(
@@ -219,7 +221,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_keyboard = [
         ["📞 Get API Number", "⚙ Set Range"],
         ["🟢 Live Traffic", "💳 Balance"],
-        ["📣 OTP Group"]
+        ["📣 OTP Group", "🛠 Support"]
     ]
     markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
     await update.message.reply_text("Welcome to MINOSMS NUMBER bot! 🤖\nPlease select an option from the menu below:", reply_markup=markup)
@@ -243,13 +245,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         wait_msg = await update.message.reply_text("⏳ Fetching real number from Minosms panel, please wait...")
         user_range = USER_RANGES.get(user_id, "23762")
         numbers = []
-        orders = []
 
         for _ in range(2):
             p, oid = await get_minosms_real_number(target_range=user_range)
             if p and p not in numbers:
                 numbers.append(p)
-                if oid: orders.append((p, oid))
 
         try:
             await wait_msg.delete()
@@ -260,14 +260,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ <b>No Real Number Available!</b>\n\nPanel has no stock for range <code>{user_range}</code>.", parse_mode="HTML")
             return
 
-        country_name, _, flag = get_country_info(numbers[0])
-        header_text = f"✅ <b>Number:</b> {flag} {country_name}"
+        _, _, flag = get_country_info(numbers[0])
+        header_text = f"✅ <b>Number:</b> {flag} {numbers[0]}"
         
         reply_markup = create_number_markup(numbers)
         await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
         
-        for p, oid in orders:
-            asyncio.create_task(poll_for_otp(update.effective_chat.id, oid, p, context))
+        for p in numbers:
+            asyncio.create_task(poll_for_otp(update.effective_chat.id, p, context))
 
     elif "Set Range" in text:
         USER_STATES[user_id] = "WAITING_FOR_RANGE"
@@ -276,15 +276,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif "Live Traffic" in text:
         USER_STATES[user_id] = None
         sorted_ranges, total_hits = await fetch_live_traffic_from_panel()
-        traffic_lines = ["📊 <b>Live Traffic</b>\n", f"📋 <b>Total OTP:</b> {total_hits}", f"⏱ <b>Record:</b> Last 15 Minutes\n"]
+        traffic_lines = ["📊 <b>Live Traffic (Sequential)</b>\n", f"📋 <b>Total Hits:</b> {total_hits}\n", "📥 <b>Range List (Dharabahibabe):</b>"]
         if sorted_ranges:
-            top_r, top_info = sorted_ranges[0]
-            _, _, top_flag = get_country_info(top_r)
-            traffic_lines.append(f"👑 <b>Top Range:</b> {top_flag} <code>{top_r}</code> - {top_info['sid']}")
-            traffic_lines.append("\n📥 <b>Range List</b>")
-            for r, info in sorted_ranges:
+            for idx, (r, info) in enumerate(sorted_ranges, 1):
                 _, _, flag = get_country_info(r)
-                traffic_lines.append(f"• {flag} <code>{r}</code> - {info['sid']} - {info['count']}")
+                traffic_lines.append(f"{idx}. {flag} <code>{r}</code> | Service: <b>{info['sid']}</b> | Hits: <b>{info['count']}</b>")
         else:
             traffic_lines.append("⚠️ No active ranges found right now.")
         await update.message.reply_text("\n".join(traffic_lines), parse_mode="HTML")
@@ -294,16 +290,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         balance_markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("💳 Withdraw via Binance", callback_data="withdraw_binance")],
             [InlineKeyboardButton("🔴 Set Binance ID", callback_data="set_binance")],
-            [InlineKeyboardButton("📣 OTP Group ↗", url=f"https://t.me/{YOUR_TELEGRAM_USERNAME}")]
+            [InlineKeyboardButton("📣 OTP Group ↗", url=OTP_GROUP_URL)]
         ])
-        await update.message.reply_text("Current Balance: Checking...\nBinance Pay ID: Not Set\n\nMinimum withdraw is $0.2", reply_markup=balance_markup)
+        await update.message.reply_text("💳 <b>Balance Details:</b>\n\n• Rate: <b>২০ পয়সা ($0.20)</b> প্রতি OTP\n• Current Balance: $0.00\n• Binance Pay ID: Not Set", reply_markup=balance_markup, parse_mode="HTML")
 
     elif "OTP Group" in text:
         USER_STATES[user_id] = None
         group_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📣 Join OTP Group ↗", url=f"https://t.me/{YOUR_TELEGRAM_USERNAME}")]
+            [InlineKeyboardButton("📣 Join OTP Group ↗", url=OTP_GROUP_URL)]
         ])
         await update.message.reply_text("📣 Click the button below to join our official OTP Group:", reply_markup=group_markup)
+
+    elif "Support" in text:
+        USER_STATES[user_id] = None
+        support_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💬 Contact Support ↗", url=f"https://t.me/{SUPPORT_USERNAME}")]
+        ])
+        await update.message.reply_text(f"🛠 For any help or support, contact admin directly: @{SUPPORT_USERNAME}", reply_markup=support_markup)
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -313,25 +316,23 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = query.from_user.id
         user_range = USER_RANGES.get(user_id, "23762")
         numbers = []
-        orders = []
 
         for _ in range(2):
             p, oid = await get_minosms_real_number(target_range=user_range)
             if p and p not in numbers:
                 numbers.append(p)
-                if oid: orders.append((p, oid))
 
         if not numbers: return
 
-        country_name, _, flag = get_country_info(numbers[0])
-        header_text = f"✅ <b>Number:</b> {flag} {country_name}"
+        _, _, flag = get_country_info(numbers[0])
+        header_text = f"✅ <b>Number:</b> {flag} {numbers[0]}"
         reply_markup = create_number_markup(numbers)
         try:
             await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
         except Exception: pass
 
-        for p, oid in orders:
-            asyncio.create_task(poll_for_otp(query.message.chat_id, oid, p, context))
+        for p in numbers:
+            asyncio.create_task(poll_for_otp(query.message.chat_id, p, context))
 
     elif query.data == "back_home":
         try: await query.message.delete()
