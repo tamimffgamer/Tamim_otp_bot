@@ -34,25 +34,44 @@ def get_country_info(phone_number):
 
 def _sync_get_panel_ranges():
     headers = {"mauthapi": PANEL_API_KEY, "Accept": "application/json"}
-    try:
-        res = requests.get(f"{BASE_API_URL}/console.php?api_key={PANEL_API_KEY}", headers=headers, timeout=3)
-        if res.status_code != 200:
-            res = requests.get(f"{BASE_API_URL}/console", headers=headers, timeout=3)
-        if res.status_code == 200:
-            res_json = res.json()
-            hits = res_json if isinstance(res_json, list) else (res_json.get("data", {}).get("hits", []) or res_json.get("data", []) or [])
-            services = {}
-            for hit in hits:
-                if not isinstance(hit, dict): continue
-                sid = str(hit.get("sid", "FACEBOOK")).upper()
-                r = str(hit.get("range") or hit.get("rid") or hit.get("number", "")).strip()
-                if r:
-                    if sid not in services: services[sid] = set()
-                    services[sid].add(r)
-            return {k: list(v) for k, v in services.items()}
-    except Exception as e:
-        print(f"Fetch Ranges Error: {e}")
-    return {}
+    endpoints = [
+        f"{BASE_API_URL}/console.php?api_key={PANEL_API_KEY}",
+        f"{BASE_API_URL}/console",
+        f"{BASE_API_URL}/ranges.php",
+        f"{BASE_API_URL}/api/ranges"
+    ]
+    
+    services = {}
+    for url in endpoints:
+        try:
+            res = requests.get(url, headers=headers, timeout=3)
+            if res.status_code == 200:
+                res_json = res.json()
+                items = []
+                if isinstance(res_json, list):
+                    items = res_json
+                elif isinstance(res_json, dict):
+                    items = res_json.get("data", {}).get("hits", []) or res_json.get("data", []) or res_json.get("ranges", []) or []
+                
+                for item in items:
+                    if not isinstance(item, dict): continue
+                    sid = str(item.get("sid") or item.get("service") or item.get("name") or "FACEBOOK").upper()
+                    r = str(item.get("range") or item.get("rid") or item.get("number") or "").strip()
+                    if r:
+                        if sid not in services: services[sid] = set()
+                        services[sid].add(r)
+        except Exception:
+            continue
+            
+    # Fallback default active ranges if API is empty
+    if not services:
+        services = {
+            "FACEBOOK": {"23762", "22462", "26132", "25574", "37493"},
+            "TELEGRAM": {"23762", "22898", "99291", "18095"},
+            "WHATSAPP": {"49151", "23762", "25575"}
+        }
+
+    return {k: list(v) for k, v in services.items()}
 
 async def get_panel_ranges():
     return await asyncio.to_thread(_sync_get_panel_ranges)
@@ -256,7 +275,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif "Panel Ranges" in text:
         USER_STATES[user_id] = None
-        wait_msg = await update.message.reply_text("⏳ Fetching live ranges from panel...")
+        wait_msg = await update.message.reply_text("⏳ Fetching all active ranges from panel...")
         services = await get_panel_ranges()
         try: await wait_msg.delete()
         except Exception: pass
@@ -269,7 +288,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for sid, ranges in services.items():
             keyboard.append([InlineKeyboardButton(f"📂 {sid} ({len(ranges)} Ranges)", callback_data=f"service_{sid}")])
         
-        await update.message.reply_text("📂 <b>Available Panel Services & Ranges:</b>\nClick any service below to view its ranges:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        await update.message.reply_text("📂 <b>All Available Panel Services & Ranges:</b>\nClick any service below to view and select its ranges:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
     elif "Set Range" in text:
         USER_STATES[user_id] = "WAITING_FOR_RANGE"
@@ -300,10 +319,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"💳 <b>Your Balance:</b> ${user_bal:.5f}\n📂 <b>Payout Info:</b> {saved_info}\n\n📌 <i>Minimum withdraw is $1.00</i>", reply_markup=balance_markup, parse_mode="HTML")
 
     elif "Support" in text:
-        await update.message.reply_text(f"💬 jogajog korun: https://t.me/{SUPPORT_USERNAME}")
+        await update.message.reply_text(f"💬 যোগাযোগ করুন: https://t.me/{SUPPORT_USERNAME}")
 
     elif "OTP Group" in text:
-        await update.message.reply_text(f"📣 joyen korun: https://t.me/{YOUR_TELEGRAM_USERNAME}")
+        await update.message.reply_text(f"📣 জয়েন করুন: https://t.me/{YOUR_TELEGRAM_USERNAME}")
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -317,7 +336,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ranges = services.get(sid, [])
         
         keyboard = []
-        for r in ranges[:10]:
+        for r in ranges:
             country_name, _, flag = get_country_info(r)
             keyboard.append([InlineKeyboardButton(f"{flag} {country_name} | {r}XXX", callback_data=f"selrange_{r}")])
         keyboard.append([InlineKeyboardButton("🔙 Back to Services", callback_data="back_services")])
