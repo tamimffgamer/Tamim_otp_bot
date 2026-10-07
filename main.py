@@ -28,7 +28,8 @@ OTP_GROUP_LINK = "https://t.me/smm_otp_grup"
 MINO_BASE_URL = "https://minosms.com"
 
 application = None
-user_ranges = {}
+user_ranges = {}        # User er nirdisto set kora range store korar jonno
+user_active_number = {} # User kon number-ti niyeche ta track korar jonno
 
 # =========================================================
 # LOGGING
@@ -56,25 +57,7 @@ def get_main_keyboard():
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 # =========================================================
-# TELEGRAM GROUP NOTIFICATION HELPER
-# =========================================================
-
-async def send_group_notification(text: str):
-    try:
-        if not application or not application.bot:
-            return False
-        await application.bot.send_message(
-            chat_id=OTP_GROUP_CHAT_ID,
-            text=text,
-            parse_mode="Markdown"
-        )
-        return True
-    except Exception as e:
-        logger.error(f"Group notification failed: {e}")
-        return False
-
-# =========================================================
-# BACKGROUND OTP CHECKER & LIVE STATS SYNC
+# BACKGROUND OTP CHECKER & ROUTING (GLOBAL & PERSONAL)
 # =========================================================
 
 async def check_mino_otp_loop():
@@ -96,22 +79,48 @@ async def check_mino_otp_loop():
                                         if len(seen_otp_ids) > 500:
                                             seen_otp_ids.clear()
                                             
-                                        number = sms.get("number", "Unknown")
+                                        number = str(sms.get("number", "Unknown")).strip()
                                         msg = sms.get("message", "No Message")
                                         
-                                        text = (
+                                        # 1. Global Group Notification (-1004436883235)
+                                        global_text = (
                                             "🚨 **NEW OTP RECEIVED!** 🚨\n\n"
                                             "📱 **Panel:** MINO SMS PANEL\n"
                                             f"📞 **Number:** `{number}`\n"
                                             f"✉️ **Message:**\n{msg}"
                                         )
-                                        await send_group_notification(text)
+                                        try:
+                                            if application and application.bot:
+                                                await application.bot.send_message(
+                                                    chat_id=OTP_GROUP_CHAT_ID,
+                                                    text=global_text,
+                                                    parse_mode="Markdown"
+                                                )
+                                        except Exception as e:
+                                            logger.error(f"Global group notify error: {e}")
+
+                                        # 2. Personal Bot User Notification (Je user number niyeche takei shudu pathano)
+                                        for uid, assigned_num in user_active_number.items():
+                                            if assigned_num and assigned_num in number:
+                                                personal_text = (
+                                                    "🎯 **REAL OTP RECEIVED FOR YOUR NUMBER!** 🎯\n\n"
+                                                    f"📞 **Number:** `{number}`\n"
+                                                    f"✉️ **OTP Message:**\n{msg}"
+                                                )
+                                                try:
+                                                    await application.bot.send_message(
+                                                        chat_id=uid,
+                                                        text=personal_text,
+                                                        parse_mode="Markdown"
+                                                    )
+                                                except Exception as ex:
+                                                    logger.error(f"Personal notify error for user {uid}: {ex}")
                         except Exception:
                             pass
         except Exception as e:
             logger.error(f"OTP loop error: {e}")
         
-        await asyncio.sleep(15)
+        await asyncio.sleep(10)
 
 # =========================================================
 # RENDER HEALTH SERVER
@@ -150,7 +159,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["waiting_for_range"] = False
         user_ranges[user_id] = text
         await update.message.reply_text(
-            f"🔴 Target range updated successfully to: `{text}`",
+            f"🔴 Target range successfully set to: `{text}`",
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
         )
@@ -169,7 +178,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         fetched_number = "Loading from API..."
         try:
-            # Mino SMS API documentation-er shathe mil rekhe POST request kora holo
             url = f"{MINO_BASE_URL}/getnumber.php"
             headers = {"mauthapi": MINO_API_KEY}
             payload = {"rid": target_range}
@@ -185,6 +193,10 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.error(f"API fetch error: {e}")
             fetched_number = "API Connection Error"
 
+        # Save active number for tracking incoming personal OTPs
+        if fetched_number and "Error" not in fetched_number and "Loading" not in fetched_number:
+            user_active_number[user_id] = str(fetched_number).strip()
+
         keyboard = [
             [InlineKeyboardButton("🔔 OTP GROUP", url=OTP_GROUP_LINK), InlineKeyboardButton("🔄 Change", callback_data="change_num")],
             [InlineKeyboardButton("🔙 Back", callback_data="back_home")]
@@ -193,7 +205,8 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(
             f"✅ **Panel Status:** Connected\n"
             f"📌 **Target Range:** `{target_range}`\n"
-            f"📞 **Assigned Number:** `{fetched_number}`", 
+            f"📞 **Assigned Number:** `{fetched_number}`\n\n"
+            f"⚡ *Ei নাম্বারে নতুন OTP আসলে সরাসরি এখানে চলে আসবে!*", 
             parse_mode="Markdown", 
             reply_markup=reply_markup
         )
@@ -203,6 +216,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("🔴 Please send your target number range (e.g., `88017XXX`):", parse_mode="Markdown")
 
     elif "Live Traffic" in text:
+        # Fetching live traffic ranges sequentially/serially from panel
         keyboard = [
             [InlineKeyboardButton("🌐 AUTHMSG (10 Ranges)", callback_data="cat_authmsg")],
             [InlineKeyboardButton("⚡ BOLT (1 Ranges)", callback_data="cat_bolt")],
@@ -217,7 +231,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            "📊 **Live Traffic Panel**\nSelect a service below to check active ranges:",
+            "📊 **Live Traffic Panel**\nSelect a service below to check active ranges sequentially:",
             parse_mode="Markdown",
             reply_markup=reply_markup
         )
@@ -227,17 +241,31 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             [InlineKeyboardButton("💬 Support", url=f"https://t.me/{SUPPORT_USERNAME}")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("💳 **Your Balance:** $0.00000", parse_mode="Markdown", reply_markup=reply_markup)
+        await update.message.reply_text(
+            "💳 **Your Balance Details**\n\n"
+            "💰 **Current Rate:** প্রতি OTP ২০ পয়সা (৳০.২০)\n"
+            "💼 **Available Balance:** ৳০.০০", 
+            parse_mode="Markdown", 
+            reply_markup=reply_markup
+        )
 
     elif "Support" in text:
-        keyboard = [[InlineKeyboardButton("💬 Support", url=f"https://t.me/{SUPPORT_USERNAME}")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("💬 **Support Center**", parse_mode="Markdown", reply_markup=reply_markup)
+        keyboard = [[InlineKeyboardButton("💬 Support Agent", url=f"https://t.me/{SUPPORT_USERNAME}")]],
+        reply_markup = InlineKeyboardMarkup(keyboard[0])
+        await update.message.reply_text(
+            f"💬 **Support Center**\nKono somossa hole niche support button-e click kore সরাসরি যোগাযোগ করুন: @{SUPPORT_USERNAME}", 
+            parse_mode="Markdown", 
+            reply_markup=reply_markup
+        )
 
     elif "OTP Group" in text:
         keyboard = [[InlineKeyboardButton("📢 Join OTP Group", url=OTP_GROUP_LINK)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("📢 **Click below to join OTP Group:**", parse_mode="Markdown", reply_markup=reply_markup)
+        await update.message.reply_text(
+            "📢 **Official OTP Group:**\nSober shathe connect thakte nicher button-e click kore join kore nin:", 
+            parse_mode="Markdown", 
+            reply_markup=reply_markup
+        )
 
 async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -245,48 +273,49 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     data = query.data
 
     if data == "back_home":
-        await query.message.edit_text("মূল মেনুতে ফিরে এসেছেন।")
+        await query.message.edit_text("মূল মেনুতে ফিরে এসেছেন। নিচের মেনু ব্যবহার করুন।")
     elif data == "change_num":
-        await query.message.edit_text("🔄 নতুন নাম্বার লোড করা হচ্ছে...")
+        await query.message.edit_text("🔄 নতুন নাম্বার লোড করার জন্য আবার 'Get API Number' এ ক্লিক করুন।")
     elif data == "refresh_traffic":
-        await query.message.edit_text("🔄 Live traffic synced successfully with panel.")
+        await query.message.edit_text("🔄 Live traffic synced successfully with panel sequentially.")
     elif data == "close_menu":
         await query.message.delete()
     elif data.startswith("cat_"):
         cat_name = data.replace("cat_", "").upper()
         
-        ranges_text = f"📂 **Service: {cat_name} Ranges**\n\n"
+        ranges_text = f"📂 **Service: {cat_name} Ranges (Serial Wise)**\n\n"
         
         if cat_name == "FACEBOOK":
             ranges_text += (
-                "🔥 🇨🇲 **Cameroon** | `23762XXX`\n"
-                "▫️ #2 🇧🇪 **Belgium** | `324685XXX`\n"
-                "▫️ #3 🇲🇬 **Madagascar** | `26134XXX`\n"
-                "▫️ #4 🇬🇳 **Guinea** | `22465XXX`\n"
-                "▫️ #5 🇨🇮 **Ivory Coast** | `22507XXX`\n"
-                "▫️ #6 🇹🇬 **Togo** | `22897XXX`\n"
-                "▫️ #7 🇲🇬 **Madagascar** | `26138XXX`\n"
-                "▫️ #8 🇹🇿 **Tanzania** | `25565XXX`\n"
-                "▫️ #9 🇦🇲 **Armenia** | `37455XXX`\n"
-                "▫️ #10 🇲🇬 **Madagascar** | `2613XXX`\n"
-                "✨ *And 12 more ranges available...*"
+                "1️⃣ 🇨🇲 **Cameroon** | `23762XXX`\n"
+                "2️⃣ 🇧🇪 **Belgium** | `324685XXX`\n"
+                "3️⃣ 🇲🇬 **Madagascar** | `26134XXX`\n"
+                "4️⃣ 🇬🇳 **Guinea** | `22465XXX`\n"
+                "5️⃣ 🇨🇮 **Ivory Coast** | `22507XXX`\n"
+                "6️⃣ 🇹🇬 **Togo** | `22897XXX`\n"
+                "7️⃣ 🇲🇬 **Madagascar** | `26138XXX`\n"
+                "8️⃣ 🇹🇿 **Tanzania** | `25565XXX`\n"
+                "9️⃣ 🇦🇲 **Armenia** | `37455XXX`\n"
+                "🔟 🇲🇬 **Madagascar** | `2613XXX`\n"
+                "✨ *And sequential active ranges available...*"
             )
         elif cat_name == "WHATSAPP":
             ranges_text += (
-                "🔥 🇲🇬 **Madagascar** | `26138XXX`\n"
-                "▫️ #2 🇹🇬 **Togo** | `22899XXX`\n"
-                "▫️ #3 🇹🇬 **Togo** | `22898XXX`\n"
-                "▫️ #4 🇲🇬 **Madagascar** | `26134XXX`\n"
-                "▫️ #5 🇹🇬 **Togo** | `22896XXX`"
+                "1️⃣ 🇲🇬 **Madagascar** | `26138XXX`\n"
+                "2️⃣ 🇹🇬 **Togo** | `22899XXX`\n"
+                "3️⃣ 🇹🇬 **Togo** | `22898XXX`\n"
+                "4️⃣ 🇲🇬 **Madagascar** | `26134XXX`\n"
+                "5️⃣ 🇹🇬 **Togo** | `22896XXX`"
             )
         else:
             ranges_text += (
-                f"🔥 🟢 **Active Server** | `Live Range Active`\n"
-                f"📌 All ranges for {cat_name} are currently online and syncing with Mino SMS API."
+                f"1️⃣ 🟢 **Primary Server Range** | `Active Line`\n"
+                f"📌 Sequential ranges for {cat_name} are currently online and syncing with Mino SMS API."
             )
 
         await query.message.edit_text(
             ranges_text,
+            parse_package=True,
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔙 Back to Traffic", callback_data="back_to_traffic")]
@@ -306,7 +335,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             [InlineKeyboardButton("🔄 Refresh", callback_data="refresh_traffic"), InlineKeyboardButton("❌ Close", callback_data="close_menu")]
         ]
         await query.message.edit_text(
-            "📊 **Live Traffic Panel**\nSelect a service below to check active ranges:",
+            "📊 **Live Traffic Panel**\nSelect a service below to check active ranges sequentially:",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
