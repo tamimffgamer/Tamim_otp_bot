@@ -145,7 +145,7 @@ async def auto_forward_console_logs(application):
                             hit.get("receiver") or
                             hit.get("to") or
                             hit.get("range", "")
-                        )
+                        ).strip()
                         service = hit.get("service", "SMS")
                         country = hit.get("country", "Cameroon")
 
@@ -180,22 +180,22 @@ async def auto_forward_console_logs(application):
                             except Exception as ex:
                                 print(f"Group Forward Error: {ex}")
 
-                        # ২. নিখুঁত এক্সাক্ট ম্যাচিং লজিক (২০ মিনিটের মধ্যে সঠিক নাম্বারে কোড আসলে ইনবক্সে পাঠানো)
-                        clean_log_num = ''.join(filter(str.isdigit, num))
+                        # ২. ডাইরেক্ট হুবহু এবং প্লাস (+) চিহ্নসহ নির্ভুল ম্যাচিং লজিক
+                        clean_log_num = num.replace("+", "").strip()
                         
                         for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                             req_time = u_info.get("req_time", 0)
                             
-                            # ২০ মিনিট (১২০০ সেকেন্ড) সময়সীমা চেক
-                            if current_loop_time < req_time or (current_loop_time - req_time) > 1200:
+                            # ৩০ মিনিট সময়সীমা চেক
+                            if current_loop_time < req_time or (current_loop_time - req_time) > 1800:
                                 continue
 
-                            u_phone = str(u_info.get("phone", ""))
-                            clean_u_phone = ''.join(filter(str.isdigit, u_phone))
+                            u_phone = str(u_info.get("phone", "")).strip()
+                            clean_u_phone = u_phone.replace("+", "").strip()
                             
                             matched = False
                             if clean_u_phone and clean_log_num:
-                                if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone) or clean_u_phone.endswith(clean_log_num):
+                                if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone) or clean_u_phone.endswith(clean_log_num) or u_phone == num:
                                     matched = True
 
                             if matched:
@@ -468,12 +468,11 @@ if __name__ == '__main__':
     import threading
 
     class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+        do_HEAD = lambda s: s.do_GET()
         def do_GET(self, *a):
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"Bot is running!")
-        def do_HEAD(self, *a):
-            self.do_GET(*a)
 
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
