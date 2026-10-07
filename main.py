@@ -150,26 +150,35 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["waiting_for_range"] = False
         user_ranges[user_id] = text
         await update.message.reply_text(
-            f"🔴 Target range updated to: `{text}`",
+            f"🔴 Target range updated successfully to: `{text}`",
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
         )
         return
 
     if "Get API Number" in text:
-        target_range = user_ranges.get(user_id, "Not Set")
-        # Mino API theke number fetch korar request
+        target_range = user_ranges.get(user_id, "")
+        
+        if not target_range or target_range == "Not Set":
+            await update.message.reply_text(
+                "⚠️ **Range Set Kora Nei!**\nProthome '⚙️ Set Range' button-e click kore apnar target range (jemon: `23762`) set kore nin.",
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard()
+            )
+            return
+
         fetched_number = "Loading from API..."
         try:
-            url = f"{MINO_BASE_URL}/getnumber.php"
-            headers = {"mauthapi": MINO_API_KEY}
-            payload = {"rid": target_range} if target_range != "Not Set" else {}
+            # Mino SMS API URL with user's selected range parameter (rid)
+            url = f"{MINO_BASE_URL}/getnumber.php?api_key={MINO_API_KEY}&rid={target_range}"
+            
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload, timeout=10) as resp:
+                async with session.get(url, timeout=10) as resp:
                     if resp.status == 200:
                         res_data = await resp.json()
-                        fetched_number = res_data.get("number") or res_data.get("phone") or "No Number Available"
-        except Exception:
+                        fetched_number = res_data.get("number") or res_data.get("phone") or res_data.get("data") or "No Number Found in this Range"
+        except Exception as e:
+            logger.error(f"API fetch error: {e}")
             fetched_number = "API Connection Error"
 
         keyboard = [
@@ -178,14 +187,16 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            f"✅ **Panel Status:** Connected\n📞 **Assigned Number:** `{fetched_number}`\n📌 **Current Range:** `{target_range}`", 
+            f"✅ **Panel Status:** Connected\n"
+            f"📌 **Target Range:** `{target_range}`\n"
+            f"📞 **Assigned Number:** `{fetched_number}`", 
             parse_mode="Markdown", 
             reply_markup=reply_markup
         )
 
     elif "Set Range" in text:
         context.user_data["waiting_for_range"] = True
-        await update.message.reply_text("🔴 Please send your target number range (e.g., 88017XXX):")
+        await update.message.reply_text("🔴 Please send your target number range (e.g., `23762XXX`):", parse_mode="Markdown")
 
     elif "Live Traffic" in text:
         keyboard = [
