@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import aiohttp
 from threading import Thread
 from flask import Flask, request, jsonify
 from telegram import Update
@@ -15,16 +16,16 @@ from telegram.ext import (
 # =========================================================
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-MINO_API_KEY = os.environ.get("MINO_API_KEY")
+MINO_API_KEY = "mino_live_a5db48f1d607f390b0d3bd1fccfcd17"
 
-# আপনার OTP/notification group ID
+# Apnar OTP/notification group ID
 OTP_GROUP_CHAT_ID = -1004436883235
 
-# আপনার Telegram username
+# Apnar Telegram username
 SUPPORT_USERNAME = "tmtamimmia"
 
-# আপনার Render Webhook URL
-WEBHOOK_URL = "https://tamim-otp-bot.onrender.com/webhook/otp"
+# Mino SMS Base URL
+MINO_BASE_URL = "https://minosms.com"
 
 # Global application instance
 application = None
@@ -47,12 +48,7 @@ logger = logging.getLogger(__name__)
 
 if not BOT_TOKEN:
     raise RuntimeError(
-        "BOT_TOKEN পাওয়া যায়নি। Render Environment Variables-এ BOT_TOKEN দিন।"
-    )
-
-if not MINO_API_KEY:
-    logger.warning(
-        "MINO_API_KEY পাওয়া যায়নি। Panel API-এর কাজগুলো বন্ধ থাকবে।"
+        "BOT_TOKEN paowa jayni. Render Environment Variables-e BOT_TOKEN din."
     )
 
 
@@ -62,7 +58,7 @@ if not MINO_API_KEY:
 
 async def send_group_notification(text: str):
     """
-    Telegram group-এ notification পাঠানোর function।
+    Telegram group-e notification pathanor function (Plain Text)।
     """
     try:
         if not application or not application.bot:
@@ -72,7 +68,6 @@ async def send_group_notification(text: str):
         await application.bot.send_message(
             chat_id=OTP_GROUP_CHAT_ID,
             text=text,
-            parse_mode="Markdown"
         )
 
         logger.info("Group notification sent successfully.")
@@ -84,7 +79,46 @@ async def send_group_notification(text: str):
 
 
 # =========================================================
-# RENDER HEALTH & WEBHOOK SERVER
+# BACKGROUND OTP CHECKER (Mino SMS API Integration)
+# =========================================================
+
+async def check_mino_otp_loop():
+    """
+    Mino API theke active number ba OTP check korar background task.
+    """
+    await asyncio.sleep(10) # Bot start howar 10 second por cholbe
+    while True:
+        try:
+            # Apni ekhane apnar target number ba active range diye check korte paren
+            # Udahoron sस्वरूप: /check.php?api_key=...&number=...
+            # Ekhane amra ekta example endpoint hit korchi
+            async with aiohttp.ClientSession() as session:
+                url = f"{MINO_BASE_URL}/check.php"
+                params = {
+                    "api_key": MINO_API_KEY,
+                    "number": "+88017XXXXXXXX" # Ekhane apnar number ba range dite paren
+                }
+                async with session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        # Jodi kono notun message ba OTP ashe tahole group e pathabe
+                        if data and "message" in data:
+                            msg = data.get("message")
+                            text = (
+                                "📦 SMM NUMBER PANEL (Mino)\n"
+                                "━━━━━━━━━━━━━━━━━━━\n"
+                                f"✉️ Message :\n{msg}"
+                            )
+                            await send_group_notification(text)
+        except Exception as e:
+            logger.error("Mino API check error: %s", e)
+        
+        # Proti 30 second por por check korbe
+        await asyncio.sleep(30)
+
+
+# =========================================================
+# RENDER HEALTH SERVER
 # =========================================================
 
 flask_app = Flask(__name__)
@@ -92,54 +126,12 @@ flask_app = Flask(__name__)
 
 @flask_app.route("/")
 def home():
-    return f"Bot is running successfully. Webhook is active at: {WEBHOOK_URL}"
+    return "Bot is running successfully with Mino API."
 
 
 @flask_app.route("/health")
 def health():
     return "OK"
-
-
-# প্যানেল থেকে OTP রিসিভ করার জন্য Webhook Endpoint
-@flask_app.route("/webhook/otp", methods=["POST"])
-def receive_otp():
-    try:
-        data = request.json
-        if not data:
-            return jsonify({"status": "error", "message": "No JSON data provided"}), 400
-
-        # প্যানেল থেকে পাঠানো ডেটা
-        service_name = data.get("service", "OTP Service")
-        country = data.get("country", "N/A")
-        range_val = data.get("range", "N/A")
-        message = data.get("message", "No message content")
-
-        # গ্রুপে পাঠানোর জন্য সুন্দর ফরম্যাট তৈরি
-        text = (
-            f"📦 **SMM NUMBER PANEL**\n"
-            f"Admin\n"
-            f"OTP\t\t\tAdmin\n"
-            f"📘 **{service_name}**\n"
-            f"━━━━━━━━━━━━━━━━━━━\n"
-            f"🇹🇯 Country : {country}\n"
-            f"🎯 Range : {range_val}\n"
-            f"🗣️ Language : English\n"
-            f"━━━━━━━━━━━━━━━━━━━\n"
-            f"✉️ Message :\n{message}"
-        )
-
-        # Async function-টি Flask thread থেকে নিরাপদে চালানোর জন্য
-        future = asyncio.run_coroutine_threadsafe(
-            send_group_notification(text),
-            application.loop
-        )
-        future.result(timeout=10)
-
-        return jsonify({"status": "success", "message": "OTP sent to group"}), 200
-
-    except Exception as e:
-        logger.exception("Webhook error: %s", e)
-        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 def run_web_server():
@@ -167,9 +159,9 @@ async def start_command(
         f"👋 Hello {name}!\n\n"
         "🤖 Bot is online.\n\n"
         "Available commands:\n"
-        "🆔 /id - আপনার Telegram ID দেখুন\n"
-        "🧪 /testgroup - Group connection পরীক্ষা করুন\n"
-        "ℹ️ /status - Bot status দেখুন"
+        "🆔 /id - Apnar Telegram ID dekhun\n"
+        "🧪 /testgroup - Group connection porikkha korun\n"
+        "ℹ️ /status - Bot status dekhun"
     )
 
     await update.message.reply_text(text)
@@ -184,28 +176,28 @@ async def id_command(
 
     text = (
         "🆔 Telegram Information\n\n"
-        f"User ID: `{user_id}`\n"
-        f"Chat ID: `{chat_id}`"
+        f"User ID: {user_id}\n"
+        f"Chat ID: {chat_id}"
     )
 
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await update.message.reply_text(text)
 
 
 async def test_group_command(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
-    await update.message.reply_text("⏳ Group connection পরীক্ষা করছি...")
+    await update.message.reply_text("⏳ Group connection porikkha korchi...")
 
     success = await send_group_notification(
-        "🟢 **Bot Group Test**\n\n"
+        "🟢 Bot Group Test\n\n"
         "Telegram group connection successfully working."
     )
 
     if success:
-        await update.message.reply_text("✅ Group test সফল হয়েছে। গ্রুপে নোটিফিকেশন পাঠানো হয়েছে।")
+        await update.message.reply_text("✅ Group test shofol hoyeche. Group-e notification pathano hoyeche.")
     else:
-        await update.message.reply_text("❌ Group test ব্যর্থ হয়েছে। Render Logs দেখুন।")
+        await update.message.reply_text("❌ Group test byartho hoyeche. Render Logs dekhun.")
 
 
 async def status_command(
@@ -220,11 +212,10 @@ async def status_command(
         f"🤖 BOT_TOKEN: {token_status}\n"
         f"🔑 MINO_API_KEY: {api_status}\n"
         f"👥 Group ID: {OTP_GROUP_CHAT_ID}\n"
-        f"🌐 Webhook URL: `{WEBHOOK_URL}`\n"
-        "🌐 Render server & Webhook: ✅ Running"
+        "🌐 Render server: ✅ Running"
     )
 
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await update.message.reply_text(text)
 
 
 async def error_handler(
@@ -261,6 +252,9 @@ async def main():
 
     logger.info("Telegram bot started successfully.")
 
+    # Background task shuru kora jate Mino API theke OTP check kora jay
+    asyncio.create_task(check_mino_otp_loop())
+
     await application.updater.start_polling(drop_pending_updates=True)
 
     # Keep running
@@ -279,7 +273,7 @@ if __name__ == "__main__":
         daemon=True,
     )
     web_thread.start()
-    logger.info("Render health & webhook server started.")
+    logger.info("Render health server started.")
 
     try:
         asyncio.run(main())
