@@ -1,7 +1,6 @@
 import os
 import asyncio
 import requests
-import json
 import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, CopyTextButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -44,9 +43,8 @@ def _sync_get_minosms_real_number(target_range):
             res_data = res.json()
             data = res_data.get("data", {})
             phone = data.get("full_number") or data.get("national_number") or data.get("phone") or data.get("number")
-            order_id = res_data.get("id") or data.get("id") or res_data.get("rid") or clean_rid
             if phone:
-                return str(phone), str(order_id)
+                return str(phone), str(clean_rid)
     except Exception as e:
         print(f"API Error: {e}")
     return None, None
@@ -58,18 +56,16 @@ def _sync_fetch_live_traffic():
     headers = {"mauthapi": MINOSMS_API_KEY, "Accept": "application/json"}
     range_counts = {}
     total_hits = 0
+    top_range_text = "N/A"
     try:
         res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=5)
         if res.status_code == 200:
             res_json = res.json()
-            # প্রিন্ট করে টার্মিনালে দেখা যাবে প্যানেল থেকে আসলে কী ডেটা আসছে
-            print("Console Response:", res_json)
-            
             hits = []
             if isinstance(res_json, list):
                 hits = res_json
             elif isinstance(res_json, dict):
-                hits = res_json.get("data", []) or res_json.get("hits", []) or res_json.get("messages", [])
+                hits = res_json.get("data", []) or res_json.get("hits", [])
                 if isinstance(hits, dict):
                     hits = hits.get("hits", []) or []
 
@@ -81,14 +77,20 @@ def _sync_fetch_live_traffic():
                     sid = hit.get("sid", "FACEBOOK")
                     if r:
                         clean_r = str(r).strip()
-                        if clean_r in range_counts:
-                            range_counts[clean_r]["count"] += 1
+                        key = f"{clean_r}XXX - {str(sid).upper()}"
+                        if key in range_counts:
+                            range_counts[key]["count"] += 1
                         else:
-                            range_counts[clean_r] = {"sid": str(sid).upper(), "count": 1}
+                            _, _, flag = get_country_info(clean_r)
+                            range_counts[key] = {"flag": flag, "range": clean_r, "sid": str(sid).upper(), "count": 1}
     except Exception as e:
         print(f"Traffic Error: {e}")
-    sorted_ranges = sorted(range_counts.items(), key=lambda x: x[1]["count"], reverse=True)
-    return sorted_ranges, total_hits
+    
+    sorted_items = sorted(range_counts.items(), key=lambda x: x[1]["count"], reverse=True)
+    if sorted_items:
+        top_range_text = f"{sorted_items[0][1]['flag']} {sorted_items[0][1]['range']}XXX - {sorted_items[0][1]['sid']}"
+    
+    return sorted_items, total_hits, top_range_text
 
 async def fetch_live_traffic_from_panel():
     return await asyncio.to_thread(_sync_fetch_live_traffic)
@@ -151,11 +153,9 @@ async def auto_forward_console_logs(application):
                 t_stamp = hit.get("time", "")
                 
                 unique_id = f"{r}_{t_stamp}_{msg}"
-                if unique_id in seen_local_hits:
-                    continue
+                if unique_id in seen_local_hits: continue
                 seen_local_hits.add(unique_id)
-                if len(seen_local_hits) > 500:
-                    seen_local_hits.clear()
+                if len(seen_local_hits) > 500: seen_local_hits.clear()
 
                 clean_num = str(r)
                 masked_num = clean_num[:6] + "X" * (len(clean_num) - 6) if len(clean_num) > 6 else clean_num
@@ -185,7 +185,10 @@ def create_number_markup(numbers_list):
     for num in numbers_list:
         _, _, flag = get_country_info(num)
         keyboard.append([InlineKeyboardButton(text=f"{flag} {num}", copy_text=CopyTextButton(text=num))])
-    keyboard.append([InlineKeyboardButton("🔔 OTP GROUP", url=OTP_GROUP_URL), InlineKeyboardButton("🔄 Change", callback_data="change_number")])
+    keyboard.append([
+        InlineKeyboardButton("🔔 OTP GROUP ↗", url=OTP_GROUP_URL),
+        InlineKeyboardButton("🔄 Change", callback_data="change_number")
+    ])
     keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_home")])
     return InlineKeyboardMarkup(keyboard)
 
@@ -207,10 +210,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_keyboard = [
         ["📞 Get API Number", "⚙ Set Range"],
         ["🟢 Live Traffic", "💳 Balance"],
-        ["📣 OTP Group", "🛠 Support"]
+        ["🛠 Support", "📣 OTP Group"]
     ]
     markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
-    await update.message.reply_text("Welcome to MINOSMS NUMBER bot! 🤖\nPlease select an option from the menu below:", reply_markup=markup)
+    await update.message.reply_text("Welcome to SMM NUMBER PANEL!\n\nConnected with Mino Panel. Select an option below:", reply_markup=markup)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -221,9 +224,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if "x" in clean_text.lower() or clean_text.isdigit():
             USER_STATES[user_id] = None
             USER_RANGES[user_id] = clean_text
-            await update.message.reply_text(f"🔴 Target range updated to: <b>{clean_text}</b>", parse_mode="HTML")
+            await update.message.reply_text(f"🔴 Target range successfully set to:\n<b>{clean_text}</b>\n\nEkhon nicher '📞 Get API Number' button e click kore panel theke number nite paren.", parse_mode="HTML")
         else:
-            await update.message.reply_text("🔴 Invalid range! Please enter a valid number prefix (e.g. 23762).")
+            await update.message.reply_text("🔴 Invalid range! Please enter a valid number prefix (e.g. 23762XXX).")
         return
 
     if "Get API Number" in text:
@@ -244,8 +247,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ <b>No Real Number Available!</b>\n\nPanel has no stock for range <code>{user_range}</code>.", parse_mode="HTML")
             return
 
-        _, _, flag = get_country_info(numbers[0])
-        header_text = f"✅ <b>Number:</b> {flag} {numbers[0]}"
+        country_name, _, flag = get_country_info(numbers[0])
+        header_text = f"✅ <b>Number:</b> {flag} <b>{country_name}</b>"
         reply_markup = create_number_markup(numbers)
         await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
         
@@ -254,28 +257,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif "Set Range" in text:
         USER_STATES[user_id] = "WAITING_FOR_RANGE"
-        await update.message.reply_text("🔴 Please send your target number range (e.g. 23762):")
+        await update.message.reply_text("🔴 Please send your target number range (e.g. 23762XXX):")
 
     elif "Live Traffic" in text:
         USER_STATES[user_id] = None
-        sorted_ranges, total_hits = await fetch_live_traffic_from_panel()
-        traffic_lines = ["📊 <b>Live Traffic (Sequential)</b>\n", f"📋 <b>Total Hits:</b> {total_hits}\n", "📥 <b>Range List (ধারাবাহিক ভাবে):</b>"]
-        if sorted_ranges:
-            for idx, (r, info) in enumerate(sorted_ranges, 1):
-                _, _, flag = get_country_info(r)
-                traffic_lines.append(f"{idx}. {flag} <code>{r}</code> | Service: <b>{info['sid']}</b> | Hits: <b>{info['count']}</b>")
+        sorted_items, total_hits, top_range = await fetch_live_traffic_from_panel()
+        
+        traffic_lines = [
+            "📊 <b>Live Traffic</b>\n",
+            f"📋 <b>Total OTP:</b> {total_hits}",
+            "⏱ <b>Record:</b> Last 15 Minutes\n",
+            f"👑 <b>Top Range:</b> {top_range}\n",
+            "📭 <b>Range List</b>"
+        ]
+        
+        if sorted_items:
+            for _, info in sorted_items[:15]:
+                traffic_lines.append(f"• {info['flag']} <code>{info['range']}XXX - {info['sid']} - {info['count']}</code>")
         else:
             traffic_lines.append("⚠️ No active ranges found right now.")
+            
         await update.message.reply_text("\n".join(traffic_lines), parse_mode="HTML")
 
     elif "Balance" in text:
         USER_STATES[user_id] = None
         balance_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💳 Withdraw via Binance", callback_data="withdraw_binance")],
-            [InlineKeyboardButton("🔴 Set Binance ID", callback_data="set_binance")],
-            [InlineKeyboardButton("📣 OTP Group ↗", url=OTP_GROUP_URL)]
+            [InlineKeyboardButton("💸 Withdraw (bKash/Binance)", callback_data="withdraw_bKash")],
+            [InlineKeyboardButton("📱 Set bKash Number", callback_data="set_bkash"), InlineKeyboardButton("🔴 Set Binance ID", callback_data="set_binance")],
+            [InlineKeyboardButton("💬 Support ↗", url=f"https://t.me/{SUPPORT_USERNAME}")]
         ])
-        await update.message.reply_text("💳 <b>Balance Details:</b>\n\n• Rate: <b>২০ পয়সা ($0.20)</b> প্রতি OTP\n• Current Balance: $0.00\n• Binance Pay ID: Not Set", reply_markup=balance_markup, parse_mode="HTML")
+        balance_text = (
+            "💳 <b>Your Balance:</b> $0.00122\n"
+            "📁 <b>Payout Info:</b> Not Set\n\n"
+            "📌 <i>Minimum withdraw is $1.00</i>"
+        )
+        await update.message.reply_text(balance_text, reply_markup=balance_markup, parse_mode="HTML")
 
     elif "OTP Group" in text:
         USER_STATES[user_id] = None
@@ -284,8 +300,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif "Support" in text:
         USER_STATES[user_id] = None
-        support_markup = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Contact Support ↗", url=f"https://t.me/{SUPPORT_USERNAME}")]])
-        await update.message.reply_text(f"🛠 For any help or support, contact admin directly: @{SUPPORT_USERNAME}", reply_markup=support_markup)
+        support_markup = InlineKeyboardMarkup([[InlineKeyboardButton("📞 সাপোর্টে যোগাযোগ করুন ↗", url=f"https://t.me/{SUPPORT_USERNAME}")]])
+        support_text = (
+            "💬 <b>সাপোর্ট সেন্টার</b>\n\n"
+            "যেকোনো সমস্যা বা প্রশ্ন থাকলে নিচের বাটনে ক্লিক করে সরাসরি আমাদের সাপোর্ট টিমের সাথে যোগাযোগ করুন।\n\n"
+            "⏰ দ্রুত সাড়া দেওয়া হবে ইনশাআল্লাহ।"
+        )
+        await update.message.reply_text(support_text, reply_markup=support_markup, parse_mode="HTML")
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -297,12 +318,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         numbers = []
         for _ in range(2):
             p, oid = await get_minosms_real_number(target_range=user_range)
-            if p and p not in numbers:
-                numbers.append(p)
+            if p and p not in numbers: numbers.append(p)
         if not numbers: return
 
-        _, _, flag = get_country_info(numbers[0])
-        header_text = f"✅ <b>Number:</b> {flag} {numbers[0]}"
+        country_name, _, flag = get_country_info(numbers[0])
+        header_text = f"✅ <b>Number:</b> {flag} <b>{country_name}</b>"
         reply_markup = create_number_markup(numbers)
         try: await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
         except Exception: pass
@@ -316,6 +336,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
     elif query.data == "set_binance":
         await query.message.reply_text("Please send your Binance Pay ID:")
+    elif query.data == "set_bkash":
+        await query.message.reply_text("Please send your bKash Number:")
+    elif query.data == "withdraw_bKash":
+        await query.message.reply_text("❌ Minimum withdraw balance ($1.00) is required!")
 
 async def post_init(application):
     asyncio.create_task(auto_forward_console_logs(application))
