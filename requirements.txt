@@ -1,4 +1,3 @@
 python-telegram-bot
-flask
-aiohttp
 requests
+flask
