@@ -102,6 +102,33 @@ def _sync_fetch_live_traffic_detailed():
 async def fetch_live_traffic_detailed():
     return await asyncio.to_thread(_sync_fetch_live_traffic_detailed)
 
+def get_existing_old_otps(phone):
+    old_otps = set()
+    try:
+        headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
+        res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
+        if res.status_code == 200:
+            hits = res.json().get("data", [])
+            if isinstance(hits, list):
+                clean_target = ''.join(filter(str.isdigit, str(phone)))
+                for hit in hits:
+                    if not isinstance(hit, dict): continue
+                    num = str(
+                        hit.get("number") or hit.get("full_number") or hit.get("phone") or 
+                        hit.get("phone_number") or hit.get("mobile") or hit.get("receiver") or 
+                        hit.get("to") or hit.get("range", "")
+                    )
+                    clean_hit_num = ''.join(filter(str.isdigit, num))
+                    if clean_target and clean_hit_num and (clean_target == clean_hit_num or clean_hit_num.endswith(clean_target) or clean_target.endswith(clean_hit_num)):
+                        msg = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or ""
+                        match_otp = re.search(r'\b\d{4,8}\b', msg)
+                        if match_otp:
+                            old_otps.add(match_otp.group(0))
+                            SEEN_OTP_IDS.add(f"{num}_{msg}")
+    except Exception as e:
+        print(f"Old OTP Fetch Error: {e}")
+    return old_otps
+
 async def auto_forward_console_logs(application):
     await asyncio.sleep(2)
     try:
@@ -119,7 +146,7 @@ async def auto_forward_console_logs(application):
                             hit.get("phone_number") or hit.get("mobile") or hit.get("receiver") or 
                             hit.get("to") or hit.get("range", "")
                         )
-                        if m and len(m.strip()) > 0 and "waiting" not in m.lower():
+                        if m and len(m.strip()) > 0:
                             SEEN_OTP_IDS.add(f"{n}_{m}")
     except Exception as e:
         print(f"Init Seen Error: {e}")
@@ -138,11 +165,9 @@ async def auto_forward_console_logs(application):
 
                         msg = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or ""
                         
-                        # STRICT CHECK: Jodi message-e kono real code ba text na thake ba "waiting" thake, tobe completely skip korbe
                         if not msg or len(msg.strip()) == 0 or "waiting" in msg.lower():
                             continue
                         
-                        # Additional check: Message-e obossoi 4 theke 8 digit-er kono OTP code thakte hobe, nahole fake/invalid dhorbe
                         match_otp = re.search(r'\b\d{4,8}\b', msg)
                         if not match_otp:
                             continue
@@ -306,11 +331,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ No stock available for range <code>{user_range}</code>.", parse_mode="HTML")
             return
 
+        existing_old = await asyncio.to_thread(get_existing_old_otps, phone)
+
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": update.effective_chat.id,
             "req_time": time.time(),
-            "sent_otps": set()
+            "sent_otps": existing_old
         }
 
         country_name, _, flag = get_country_info(phone)
@@ -373,11 +400,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer(f"❌ No stock available for range {user_range}.", show_alert=True)
             return
 
+        existing_old = await asyncio.to_thread(get_existing_old_otps, phone)
+
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": query.message.chat_id,
             "req_time": time.time(),
-            "sent_otps": set()
+            "sent_otps": existing_old
         }
 
         country_name, _, flag = get_country_info(phone)
