@@ -5,10 +5,12 @@ import urllib.request
 import json
 from threading import Thread
 from flask import Flask, request, jsonify
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
+    MessageHandler,
+    filters,
     ContextTypes,
 )
 
@@ -22,8 +24,9 @@ MINO_API_KEY = "mino_live_a5db48f1d607f390b0d3bd1fccfcd17"
 # আপনার OTP/notification group ID
 OTP_GROUP_CHAT_ID = -1004436883235
 
-# আপনার Telegram username
+# আপনার Telegram username / Group link
 SUPPORT_USERNAME = "tmtamimmia"
+OTP_GROUP_LINK = "https://t.me/+YourGroupInviteLink" # আপনার গ্রুপের লিঙ্ক এখানে দিতে পারেন
 
 # Mino SMS Base URL
 MINO_BASE_URL = "https://minosms.com"
@@ -54,13 +57,26 @@ if not BOT_TOKEN:
 
 
 # =========================================================
+# KEYBOARD HELPER
+# =========================================================
+
+def get_main_keyboard():
+    """
+    বটের নিচে যে বাটনগুলো দেখা যায় (Custom Reply Keyboard)
+    """
+    keyboard = [
+        ["📞 Get API Number", "⚙️ Set Range"],
+        ["🟢 Live Traffic", "💳 Balance"],
+        ["💬 Support", "📢 OTP Group"]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+
+# =========================================================
 # TELEGRAM GROUP NOTIFICATION HELPER
 # =========================================================
 
 async def send_group_notification(text: str):
-    """
-    Telegram group-এ notification পাঠানোর function।
-    """
     try:
         if not application or not application.bot:
             logger.error("Bot instance not initialized yet.")
@@ -70,31 +86,23 @@ async def send_group_notification(text: str):
             chat_id=OTP_GROUP_CHAT_ID,
             text=text,
         )
-
-        logger.info("Group notification sent successfully.")
         return True
-
     except Exception as e:
         logger.exception("Group notification failed: %s", e)
         return False
 
 
 # =========================================================
-# BACKGROUND OTP CHECKER (Using built-in urllib)
+# BACKGROUND OTP CHECKER
 # =========================================================
 
 async def check_mino_otp_loop():
-    """
-    Mino API থেকে active number বা OTP চেক করার background task।
-    """
     await asyncio.sleep(10)
     while True:
         try:
-            # এখানে আপনার নির্দিষ্ট নাম্বার বা রেঞ্জ বসাতে হবে
             target_number = "+88017XXXXXXXX"
             url = f"{MINO_BASE_URL}/check.php?api_key={MINO_API_KEY}&number={target_number}"
             
-            # Request পাঠানো
             req = urllib.request.Request(url)
             with urllib.request.urlopen(req, timeout=10) as response:
                 if response.status == 200:
@@ -107,11 +115,9 @@ async def check_mino_otp_loop():
                             f"✉️ Message :\n{msg}"
                         )
                         await send_group_notification(text)
-        except Exception as e:
-            # যদি কোনো রেসপন্স না থাকে বা নাম্বার একটিভ না থাকে তবে লুপ থামবে না
+        except Exception:
             pass
         
-        # প্রতি ৩০ সেকেন্ড পর পর চেক করবে
         await asyncio.sleep(30)
 
 
@@ -121,105 +127,111 @@ async def check_mino_otp_loop():
 
 flask_app = Flask(__name__)
 
-
 @flask_app.route("/")
 def home():
     return "Bot is running successfully with Mino API."
-
 
 @flask_app.route("/health")
 def health():
     return "OK"
 
-
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
-    flask_app.run(
-        host="0.0.0.0",
-        port=port,
-        debug=False,
-        use_reloader=False,
-    )
+    flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 
 # =========================================================
-# TELEGRAM COMMANDS (/START, /ID, /TESTGROUP, /STATUS)
+# TELEGRAM COMMANDS & BUTTON HANDLERS
 # =========================================================
 
-async def start_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     name = user.first_name if user else "User"
 
     text = (
         f"👋 Hello {name}!\n\n"
         "🤖 Bot is online.\n\n"
-        "Available commands:\n"
-        "🆔 /id - আপনার Telegram ID দেখুন\n"
-        "🧪 /testgroup - Group connection পরীক্ষা করুন\n"
-        "ℹ️ /status - Bot status দেখুন"
+        "নিচের বাটনগুলো ব্যবহার করে আপনার প্যানেল নিয়ন্ত্রণ করুন:"
     )
 
-    await update.message.reply_text(text)
+    await update.message.reply_text(text, reply_markup=get_main_keyboard())
 
 
-async def id_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
+async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+
+    if "Get API Number" in text:
+        reply_text = (
+            "📞 **API Number Info:**\n\n"
+            f"আপনার API Key সক্রিয় আছে। Mino প্যানেল থেকে নাম্বার সংগ্রহ করতে ওয়েবসাইট ভিজিট করুন:\n"
+            f"{MINO_BASE_URL}"
+        )
+        await update.message.reply_text(reply_text, parse_mode="Markdown")
+
+    elif "Set Range" in text:
+        reply_text = (
+            "⚙️ **Set Range:**\n\n"
+            "নাম্বার বা রেঞ্জ সেট করতে আপনার Mino প্যানেলের ড্যাশবোর্ড ব্যবহার করুন।"
+        )
+        await update.message.reply_text(reply_text, parse_mode="Markdown")
+
+    elif "Live Traffic" in text:
+        reply_text = (
+            "🟢 **Live Traffic:**\n\n"
+            "বর্তমানে প্যানেলের লাইভ ট্রাফিক দেখতে Mino ওয়েবসাইটে লগইন করুন।"
+        )
+        await update.message.reply_text(reply_text, parse_mode="Markdown")
+
+    elif "Balance" in text:
+        # এখানে চাইলে API থেকে রিয়েল ব্যালেন্স ফেচ করা যাবে
+        reply_text = (
+            "💳 **Account Balance:**\n\n"
+            f"আপনার প্যানেল ব্যালেন্স দেখতে Mino প্যানেলে প্রবেশ করুন।"
+        )
+        await update.message.reply_text(reply_text, parse_mode="Markdown")
+
+    elif "Support" in text:
+        reply_text = (
+            "💬 **Support:**\n\n"
+            f"যেকোনো প্রয়োজনে যোগাযোগ করুন: @{SUPPORT_USERNAME}"
+        )
+        await update.message.reply_text(reply_text)
+
+    elif "OTP Group" in text:
+        reply_text = (
+            "📢 **OTP Group:**\n\n"
+            "সব OTP নোটিফিকেশন পেতে আমাদের অফিশিয়াল গ্রুপে যুক্ত থাকুন।"
+        )
+        await update.message.reply_text(reply_text)
+
+
+async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
-
-    text = (
-        "🆔 Telegram Information\n\n"
-        f"User ID: {user_id}\n"
-        f"Chat ID: {chat_id}"
-    )
-
+    text = f"🆔 Telegram Information\n\nUser ID: {user_id}\nChat ID: {chat_id}"
     await update.message.reply_text(text)
 
 
-async def test_group_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_URL if 'DEFAULT_URL' in globals() else ContextTypes.DEFAULT_TYPE,
-):
+async def test_group_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Group connection পরীক্ষা করছি...")
-
-    success = await send_group_notification(
-        "🟢 Bot Group Test\n\n"
-        "Telegram group connection successfully working."
-    )
-
+    success = await send_group_notification("🟢 Bot Group Test: Connection successfully working.")
     if success:
-        await update.message.reply_text("✅ Group test সফল হয়েছে। গ্রুপে নোটিফিকেশন পাঠানো হয়েছে।")
+        await update.message.reply_text("✅ Group test সফল হয়েছে।")
     else:
-        await update.message.reply_text("❌ Group test ব্যর্থ হয়েছে। Render Logs দেখুন।")
+        await update.message.reply_text("❌ Group test ব্যর্থ হয়েছে।")
 
 
-async def status_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     token_status = "✅ Set" if BOT_TOKEN else "❌ Missing"
     api_status = "✅ Set" if MINO_API_KEY else "❌ Missing"
-
     text = (
-        "📊 Bot Status\n\n"
-        f"🤖 BOT_TOKEN: {token_status}\n"
-        f"🔑 MINO_API_KEY: {api_status}\n"
-        f"👥 Group ID: {OTP_GROUP_CHAT_ID}\n"
-        "🌐 Render server: ✅ Running"
+        f"📊 Bot Status\n\nBOT_TOKEN: {token_status}\n"
+        f"MINO_API_KEY: {api_status}\nGroup ID: {OTP_GROUP_CHAT_ID}"
     )
-
     await update.message.reply_text(text)
 
 
-async def error_handler(
-    update: object,
-    context: ContextTypes.DEFAULT_TYPE,
-):
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.exception("Telegram error:", exc_info=context.error)
 
 
@@ -230,46 +242,33 @@ async def error_handler(
 async def main():
     global application
 
-    application = (
-        ApplicationBuilder()
-        .token(BOT_TOKEN)
-        .build()
-    )
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Commands
+    # Commands & Handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("id", id_command))
     application.add_handler(CommandHandler("testgroup", test_group_command))
     application.add_handler(CommandHandler("status", status_command))
+    
+    # Text buttons handler (বাটনগুলোর লেখা ম্যাচ করার জন্য)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
+    
     application.add_error_handler(error_handler)
 
     logger.info("Starting Telegram bot...")
-
     await application.initialize()
     await application.start()
 
-    logger.info("Telegram bot started successfully.")
-
-    # Background task শুরু করা
     asyncio.create_task(check_mino_otp_loop())
 
     await application.updater.start_polling(drop_pending_updates=True)
 
-    # Keep running
     while True:
         await asyncio.sleep(3600)
 
 
-# =========================================================
-# START EVERYTHING
-# =========================================================
-
 if __name__ == "__main__":
-    # Render web server thread
-    web_thread = Thread(
-        target=run_web_server,
-        daemon=True,
-    )
+    web_thread = Thread(target=run_web_server, daemon=True)
     web_thread.start()
     logger.info("Render health server started.")
 
