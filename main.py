@@ -41,7 +41,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN পাওয়া যায়নি।")
+    raise RuntimeError("BOT_TOKEN paowa jayni.")
 
 # =========================================================
 # KEYBOARD
@@ -74,12 +74,12 @@ async def send_group_notification(text: str):
         return False
 
 # =========================================================
-# BACKGROUND OTP CHECKER (Panel to Group Sync)
+# BACKGROUND OTP CHECKER
 # =========================================================
 
 async def check_mino_otp_loop():
     await asyncio.sleep(10)
-    seen_otp_ids = set() # ডুপ্লিকেট নোটিফিকেশন এড়াতে
+    seen_otp_ids = set()
     while True:
         try:
             url = f"{MINO_BASE_URL}/st/api.php?api_key={MINO_API_KEY}&action=get_sms"
@@ -90,10 +90,9 @@ async def check_mino_otp_loop():
                             data = await response.json()
                             if data and isinstance(data, list):
                                 for sms in data:
-                                    sms_id = sms.get("id", sms.get("number") + str(sms.get("message")))
+                                    sms_id = sms.get("id", str(sms.get("number")) + str(sms.get("message")))
                                     if sms_id not in seen_otp_ids:
                                         seen_otp_ids.add(sms_id)
-                                        # মেমোরি সুরক্ষায় লিমিট রাখা
                                         if len(seen_otp_ids) > 500:
                                             seen_otp_ids.clear()
                                             
@@ -170,18 +169,22 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("🔴 Please send your target number range:")
 
     elif "Live Traffic" in text:
-        # আপনার চাওয়া মতো সুন্দর সাজানো রেঞ্জ লিস্ট
+        # Apnar panel-er moto category ebong range gulo button akare sajano holo
         keyboard = [
-            [InlineKeyboardButton("👀 Call Of Duty Range (1)", callback_data="tr_cod")],
-            [InlineKeyboardButton("👀 Facebook Range (86)", callback_data="tr_fb")],
-            [InlineKeyboardButton("👀 Imo Range (3)", callback_data="tr_imo")],
-            [InlineKeyboardButton("👀 Instagram Range (6)", callback_data="tr_insta")],
-            [InlineKeyboardButton("👀 Whatsapp Range (4)", callback_data="tr_wa")],
+            [InlineKeyboardButton("🌐 AUTHMSG (10 Ranges)", callback_data="cat_authmsg")],
+            [InlineKeyboardButton("⚡ BOLT (1 Ranges)", callback_data="cat_bolt")],
+            [InlineKeyboardButton("🌸 DING (1 Ranges)", callback_data="cat_ding")],
+            [InlineKeyboardButton("📘 FACEBOOK (22 Ranges)", callback_data="cat_facebook")],
+            [InlineKeyboardButton("💬 IMO (10 Ranges)", callback_data="cat_imo")],
+            [InlineKeyboardButton("🟥 TWILIO (3 Ranges)", callback_data="cat_twilio")],
+            [InlineKeyboardButton("🚗 UBER (1 Ranges)", callback_data="cat_uber")],
+            [InlineKeyboardButton("🛡️ VERIFY (1 Ranges)", callback_data="cat_verify")],
+            [InlineKeyboardButton("🟢 WHATSAPP (5 Ranges)", callback_data="cat_whatsapp")],
             [InlineKeyboardButton("🔄 Refresh", callback_data="refresh_traffic"), InlineKeyboardButton("❌ Close", callback_data="close_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            "📊 **Live Traffic Panel**\nSelect a service range below to check details:",
+            "📊 **Live Traffic Panel**\nSelect a service below to check ranges and details:",
             parse_mode="Markdown",
             reply_markup=reply_markup
         )
@@ -194,9 +197,10 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("💳 **Your Balance:** $0.00000", parse_mode="Markdown", reply_markup=reply_markup)
 
     elif "Support" in text:
-        keyboard = [[InlineKeyboardButton("💬 সাপোর্টে যোগাযোগ করুন", url=f"https://t.me/{SUPPORT_USERNAME}")]]
+        keyboard = [[InlineKeyboardButton("💬 Saporte jogajog korun", url=f"https://t.me/{SUPPORT_USERNAME})"]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("💬 **সাপোর্ট সেন্টার**", parse_mode="Markdown", reply_markup=reply_markup)
+        await update.message.reply_text("💬 **Support Center**", parse_mode="Markdown", reply_markup=reply_markup)
 
     elif "OTP Group" in text:
         keyboard = [[InlineKeyboardButton("📢 Join OTP Group", url=OTP_GROUP_LINK)]]
@@ -209,19 +213,45 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     data = query.data
 
     if data == "back_home":
-        await query.message.edit_text("মূল মেনুতে ফিরে এসেছেন।")
+        await query.message.edit_text("Muler menute fire esechen.")
     elif data == "change_num":
-        await query.message.edit_text("🔄 নতুন নাম্বার লোড করা হচ্ছে...")
+        await query.message.edit_text("🔄 Notun number load kora hocche...")
     elif data == "refresh_traffic":
-        await query.message.edit_text("🔄 Live traffic synced successfully.")
+        await query.message.edit_text("🔄 Live traffic synced successfully with panel.")
     elif data == "close_menu":
         await query.message.delete()
-    elif data.startswith("tr_"):
-        service_name = data.replace("tr_", "").upper()
-        await query.answer(f"Selected {service_name} Range traffic!", show_alert=False)
-        await query.message.reply_text(f"📌 **Service Range Info:** Showing active traffic and numbers for `{service_name}`.", parse_mode="Markdown")
+    elif data.startswith("cat_"):
+        cat_name = data.replace("cat_", "").upper()
+        # Panel er moto specific category select korle tar range er details dekhanor jonno
+        await query.message.edit_text(
+            f"📂 **Category: {cat_name}**\n\n"
+            f"🔹 Active ranges loaded successfully from Mino panel.\n"
+            f"Status: Online & Ready 🟢",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Back to Traffic", callback_data="back_to_traffic")]
+            ])
+        )
+    elif data == "back_to_traffic":
+        keyboard = [
+            [InlineKeyboardButton("🌐 AUTHMSG (10 Ranges)", callback_data="cat_authmsg")],
+            [InlineKeyboardButton("⚡ BOLT (1 Ranges)", callback_data="cat_bolt")],
+            [InlineKeyboardButton("🌸 DING (1 Ranges)", callback_data="cat_ding")],
+            [InlineKeyboardButton("📘 FACEBOOK (22 Ranges)", callback_data="cat_facebook")],
+            [InlineKeyboardButton("💬 IMO (10 Ranges)", callback_data="cat_imo")],
+            [InlineKeyboardButton("🟥 TWILIO (3 Ranges)", callback_data="cat_twilio")],
+            [InlineKeyboardButton("🚗 UBER (1 Ranges)", callback_data="cat_uber")],
+            [InlineKeyboardButton("🛡️ VERIFY (1 Ranges)", callback_data="cat_verify")],
+            [InlineKeyboardButton("🟢 WHATSAPP (5 Ranges)", callback_data="cat_whatsapp")],
+            [InlineKeyboardButton("🔄 Refresh", callback_data="refresh_traffic"), InlineKeyboardButton("❌ Close", callback_data="close_menu")]
+        ]
+        await query.message.edit_text(
+            "📊 **Live Traffic Panel**\nSelect a service below to check ranges and details:",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
     else:
-        await query.answer("সম্পন্ন হয়েছে!", show_alert=False)
+        await query.answer("Sampurno hoyeche!", show_alert=False)
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error("Telegram error occurred:", exc_info=context.error)
@@ -243,7 +273,6 @@ async def main():
     await application.initialize()
     await application.start()
 
-    # ব্যাকগ্রাউন্ডে প্যানেল থেকে OTP চেক করার লুপ চালু রাখা হলো
     asyncio.create_task(check_mino_otp_loop())
 
     await application.updater.start_polling(drop_pending_updates=True)
