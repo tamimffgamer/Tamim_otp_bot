@@ -163,13 +163,12 @@ async def auto_forward_console_logs(application):
                         country = hit.get("country", "Cameroon")
 
                         log_id = f"{num}_{msg}"
-                        
                         clean_log_num = ''.join(filter(str.isdigit, num))
                         
                         for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                             req_time = u_info.get("req_time", 0)
                             
-                            # STRICT CHECK: Message must arrive AFTER the user requested the number AND within 20 minutes (1200 seconds)
+                            # STRICT CHECK: Message must arrive strictly AFTER the user clicked/requested the number AND within 20 minutes (1200s)
                             if current_loop_time < req_time or (current_loop_time - req_time) > 1200:
                                 continue
 
@@ -187,11 +186,15 @@ async def auto_forward_console_logs(application):
                                     matched = True
 
                             if matched:
-                                # Ensure this exact message log hasn't been processed for this user session already
                                 session_seen = u_info.setdefault("session_seen_logs", set())
                                 if log_id not in session_seen:
                                     session_seen.add(log_id)
                                     
+                                    # Extra check: Ignore log if its unique identifier or text was already present in initial snapshot before user requested the number
+                                    initial_snapshot_set = u_info.get("initial_snapshot", set())
+                                    if log_id in initial_snapshot_set:
+                                        continue
+
                                     otp_code = match_otp.group(0)
                                     sent_set = u_info.setdefault("sent_otps", set())
                                     if otp_code not in sent_set:
@@ -215,7 +218,7 @@ async def auto_forward_console_logs(application):
                                         except Exception as per_ex:
                                             print(f"Personal Send Error: {per_ex}")
 
-                        # Also handle public group forwarding if it's new globally
+                        # Public group forward for brand new global live traffic
                         if log_id not in SEEN_CONSOLE_MESSAGES:
                             SEEN_CONSOLE_MESSAGES.add(log_id)
                             if len(SEEN_CONSOLE_MESSAGES) > 5000:
@@ -315,17 +318,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ No stock available for range <code>{user_range}</code>.", parse_mode="HTML")
             return
 
-        # Record exact timestamp when the user receives the number. Only messages arriving AFTER this timestamp will be forwarded.
+        current_snapshot = await asyncio.to_thread(fetch_current_console_snapshot)
+
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": update.effective_chat.id,
             "req_time": time.time(),
             "sent_otps": set(),
-            "session_seen_logs": set()
+            "session_seen_logs": set(),
+            "initial_snapshot": current_snapshot
         }
 
         country_name, _, flag = get_country_info(phone)
-        header_text = f"✅ <b>Number:</b> {flag} {country_name}\n\nEkhon ei number-ti te OTP pathale shudhu matro agami 20 minute-er moddhe asha real code-i apnar inbox-e ashbe!"
+        header_text = f"✅ <b>Number:</b> {flag} {country_name}\n\nEkhon ei number-ti te OTP pathale shudhu matro notun real code-i apnar inbox-e ashbe!"
         reply_markup = create_single_number_markup(phone)
         await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
 
@@ -384,12 +389,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer(f"❌ No stock available for range {user_range}.", show_alert=True)
             return
 
+        current_snapshot = await asyncio.to_thread(fetch_current_console_snapshot)
+
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": query.message.chat_id,
             "req_time": time.time(),
             "sent_otps": set(),
-            "session_seen_logs": set()
+            "session_seen_logs": set(),
+            "initial_snapshot": current_snapshot
         }
 
         country_name, _, flag = get_country_info(phone)
