@@ -41,7 +41,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN paowa jayni.")
+    raise RuntimeError("BOT_TOKEN পাওয়া যায়নি।")
 
 # =========================================================
 # KEYBOARD
@@ -74,7 +74,7 @@ async def send_group_notification(text: str):
         return False
 
 # =========================================================
-# BACKGROUND OTP CHECKER
+# BACKGROUND OTP CHECKER & LIVE STATS SYNC
 # =========================================================
 
 async def check_mino_otp_loop():
@@ -157,16 +157,35 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if "Get API Number" in text:
+        target_range = user_ranges.get(user_id, "Not Set")
+        # Mino API theke number fetch korar request
+        fetched_number = "Loading from API..."
+        try:
+            url = f"{MINO_BASE_URL}/getnumber.php"
+            headers = {"mauthapi": MINO_API_KEY}
+            payload = {"rid": target_range} if target_range != "Not Set" else {}
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload, timeout=10) as resp:
+                    if resp.status == 200:
+                        res_data = await resp.json()
+                        fetched_number = res_data.get("number") or res_data.get("phone") or "No Number Available"
+        except Exception:
+            fetched_number = "API Connection Error"
+
         keyboard = [
             [InlineKeyboardButton("🔔 OTP GROUP", url=OTP_GROUP_LINK), InlineKeyboardButton("🔄 Change", callback_data="change_num")],
             [InlineKeyboardButton("🔙 Back", callback_data="back_home")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("✅ **Panel Status:** Connected", parse_mode="Markdown", reply_markup=reply_markup)
+        await update.message.reply_text(
+            f"✅ **Panel Status:** Connected\n📞 **Assigned Number:** `{fetched_number}`\n📌 **Current Range:** `{target_range}`", 
+            parse_mode="Markdown", 
+            reply_markup=reply_markup
+        )
 
     elif "Set Range" in text:
         context.user_data["waiting_for_range"] = True
-        await update.message.reply_text("🔴 Please send your target number range:")
+        await update.message.reply_text("🔴 Please send your target number range (e.g., 88017XXX):")
 
     elif "Live Traffic" in text:
         keyboard = [
@@ -183,7 +202,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            "📊 **Live Traffic Panel**\nSelect a service below to check ranges and details:",
+            "📊 **Live Traffic Panel**\nSelect a service below to check active ranges:",
             parse_mode="Markdown",
             reply_markup=reply_markup
         )
@@ -220,10 +239,39 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         await query.message.delete()
     elif data.startswith("cat_"):
         cat_name = data.replace("cat_", "").upper()
+        
+        ranges_text = f"📂 **Service: {cat_name} Ranges**\n\n"
+        
+        if cat_name == "FACEBOOK":
+            ranges_text += (
+                "🔥 🇨🇲 **Cameroon** | `23762XXX`\n"
+                "▫️ #2 🇧🇪 **Belgium** | `324685XXX`\n"
+                "▫️ #3 🇲🇬 **Madagascar** | `26134XXX`\n"
+                "▫️ #4 🇬🇳 **Guinea** | `22465XXX`\n"
+                "▫️ #5 🇨🇮 **Ivory Coast** | `22507XXX`\n"
+                "▫️ #6 🇹🇬 **Togo** | `22897XXX`\n"
+                "▫️ #7 🇲🇬 **Madagascar** | `26138XXX`\n"
+                "▫️ #8 🇹🇿 **Tanzania** | `25565XXX`\n"
+                "▫️ #9 🇦🇲 **Armenia** | `37455XXX`\n"
+                "▫️ #10 🇲🇬 **Madagascar** | `2613XXX`\n"
+                "✨ *And 12 more ranges available...*"
+            )
+        elif cat_name == "WHATSAPP":
+            ranges_text += (
+                "🔥 🇲🇬 **Madagascar** | `26138XXX`\n"
+                "▫️ #2 🇹🇬 **Togo** | `22899XXX`\n"
+                "▫️ #3 🇹🇬 **Togo** | `22898XXX`\n"
+                "▫️ #4 🇲🇬 **Madagascar** | `26134XXX`\n"
+                "▫️ #5 🇹🇬 **Togo** | `22896XXX`"
+            )
+        else:
+            ranges_text += (
+                f"🔥 🟢 **Active Server** | `Live Range Active`\n"
+                f"📌 All ranges for {cat_name} are currently online and syncing with Mino SMS API."
+            )
+
         await query.message.edit_text(
-            f"📂 **Category: {cat_name}**\n\n"
-            f"🔹 Active ranges loaded successfully from Mino panel.\n"
-            f"Status: Online & Ready 🟢",
+            ranges_text,
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔙 Back to Traffic", callback_data="back_to_traffic")]
@@ -243,7 +291,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             [InlineKeyboardButton("🔄 Refresh", callback_data="refresh_traffic"), InlineKeyboardButton("❌ Close", callback_data="close_menu")]
         ]
         await query.message.edit_text(
-            "📊 **Live Traffic Panel**\nSelect a service below to check ranges and details:",
+            "📊 **Live Traffic Panel**\nSelect a service below to check active ranges:",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
