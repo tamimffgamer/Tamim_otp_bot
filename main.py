@@ -28,8 +28,8 @@ OTP_GROUP_LINK = "https://t.me/smm_otp_grup"
 MINO_BASE_URL = "https://minosms.com"
 
 application = None
-user_ranges = {}        # ইউজারের সেট করা রেঞ্জ সংরক্ষণ করার জন্য
-user_active_number = {} # ইউজার যে নাম্বারটি নিবে তা ট্র্যাক করার জন্য
+user_ranges = {}        
+user_active_number = {} 
 
 # =========================================================
 # LOGGING
@@ -42,7 +42,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN পাওয়া যায়নি।")
+    raise RuntimeError("BOT_TOKEN paoya jayni.")
 
 # =========================================================
 # KEYBOARD
@@ -57,7 +57,7 @@ def get_main_keyboard():
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 # =========================================================
-# BACKGROUND OTP CHECKER (GLOBAL & PERSONAL ROUTING)
+# BACKGROUND OTP CHECKER
 # =========================================================
 
 async def check_mino_otp_loop():
@@ -82,7 +82,6 @@ async def check_mino_otp_loop():
                                         number = str(sms.get("number", "Unknown")).strip()
                                         msg = sms.get("message", "No Message")
                                         
-                                        # ১. প্যানেলের সব ওটিপি নির্দিষ্ট গ্রুপে পাঠানো (-1004436883235)
                                         global_text = (
                                             "🚨 **NEW OTP RECEIVED!** 🚨\n\n"
                                             "📱 **Panel:** MINO SMS PANEL\n"
@@ -99,7 +98,6 @@ async def check_mino_otp_loop():
                                         except Exception as e:
                                             logger.error(f"Global group notify error: {e}")
 
-                                        # ২. ইউজার বট থেকে যে নাম্বার নিয়েছে, শুধুমাত্র সেই নাম্বারের রিয়েল OTP ইউজারের পার্সোনাল বটে পাঠানো
                                         for uid, assigned_num in user_active_number.items():
                                             if assigned_num and assigned_num in number:
                                                 personal_text = (
@@ -159,7 +157,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["waiting_for_range"] = False
         user_ranges[user_id] = text.strip()
         await update.message.reply_text(
-            f"🔴 Target range successfully set to: `{text.strip()}`\n\nএখন নিচের **'📞 Get API Number'** বাটনে ক্লিক করে প্যানেل থেকে সরাসরি আসল নাম্বার নিতে পারেন।",
+            f"🔴 Target range successfully set to: `{text.strip()}`\n\nEkhon nicher **'📞 Get API Number'** button e click kore panel theke number nite paren.",
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
         )
@@ -168,10 +166,9 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     if "Get API Number" in text:
         target_range = user_ranges.get(user_id, "")
         
-        # রেঞ্জ সেট করা না থাকলে ইউজারকে আগে রেঞ্জ সেট করতে বলা হবে
         if not target_range:
             await update.message.reply_text(
-                "⚠️ **Range Set Kora Nei!**\nপ্রথমে '⚙️ Set Range' বাটনে ক্লিক করে রেঞ্জ সেট করুন, তারপর নাম্বার নিন।",
+                "⚠️ **Range Set Kora Nei!**\nProthome '⚙️ Set Range' button e click kore range set korun.",
                 parse_mode="Markdown",
                 reply_markup=get_main_keyboard()
             )
@@ -179,37 +176,28 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         fetched_number = "Loading from API..."
         try:
-            # Mino SMS API এর মাধ্যমে আসল নাম্বার ফেচ করার সঠিক রিকোয়েস্ট
-            url = f"{MINO_BASE_URL}/getnumber.php"
-            headers = {"mauthapi": MINO_API_KEY}
-            payload = {"rid": target_range}
+            # Panel er sathe match kore sothik endpoint parameters deya holo
+            url = f"{MINO_BASE_URL}/st/api.php?api_key={MINO_API_KEY}&action=getnumber&rid={target_range}"
             
             async with aiohttp.ClientSession() as session:
-                # POST রিকোয়েস্ট ট্রাই করা হচ্ছে
-                async with session.post(url, headers=headers, json=payload, timeout=10) as resp:
+                async with session.get(url, timeout=10) as resp:
                     if resp.status == 200:
                         try:
                             res_data = await resp.json()
-                            fetched_number = res_data.get("number") or res_data.get("phone") or res_data.get("data") or res_data.get("result") or str(res_data)
+                            if isinstance(res_data, dict):
+                                fetched_number = res_data.get("number") or res_data.get("phone") or res_data.get("data") or res_data.get("result") or str(res_data)
+                            elif isinstance(res_data, list) and len(res_data) > 0:
+                                fetched_number = str(res_data[0].get("number", res_data[0]))
+                            else:
+                                fetched_number = str(res_data)
                         except:
                             fetched_number = await resp.text()
                     else:
-                        # যদি POST কাজ না করে, GET মেথড ফলব্যাক হিসেবে কাজ করবে
-                        get_url = f"{MINO_BASE_URL}/getnumber.php?api_key={MINO_API_KEY}&rid={target_range}"
-                        async with session.get(get_url, timeout=10) as get_resp:
-                            if get_resp.status == 200:
-                                try:
-                                    res_data = await get_resp.json()
-                                    fetched_number = res_data.get("number") or res_data.get("phone") or res_data.get("data") or res_data.get("result") or str(res_data)
-                                except:
-                                    fetched_number = await get_resp.text()
-                            else:
-                                fetched_number = f"API Error: Status {resp.status}"
+                        fetched_number = f"API Error: Status {resp.status}"
         except Exception as e:
             logger.error(f"API fetch error: {e}")
             fetched_number = "API Connection Error"
 
-        # নাম্বার সফলভাবে আসলে তা পার্সোনাল ট্র্যাকিং লিস্টে সেভ করা হলো
         if fetched_number and "Error" not in fetched_number and "Loading" not in fetched_number and "Connection" not in fetched_number:
             user_active_number[user_id] = str(fetched_number).strip()
 
@@ -222,17 +210,16 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             f"✅ **Panel Status:** Connected\n"
             f"📌 **Target Range:** `{target_range}`\n"
             f"📞 **Assigned Number:** `{fetched_number}`\n\n"
-            f"⚡ *এই নাম্বারে নতুন OTP আসলে সরাসরি আপনার এই ইনবক্সে চলে আসবে!*", 
+            f"⚡ *Ei number e noton OTP asle apnar inbox e chole asbe!*", 
             parse_mode="Markdown", 
             reply_markup=reply_markup
         )
 
     elif "Set Range" in text:
         context.user_data["waiting_for_range"] = True
-        await update.message.reply_text("🔴 দয়া করে আপনার কাঙ্ক্ষিত নাম্বার রেঞ্জটি পাঠান (যেমন: `23762XXX`):", parse_mode="Markdown")
+        await update.message.reply_text("🔴 Doya kore apnar kankkhito number range ti pathan (jehon: `23762XXX`):", parse_mode="Markdown")
 
     elif "Live Traffic" in text:
-        # লাইভ ট্রাফিকের জন্য ধারাবাহিক বা সিরিয়াল অনুযায়ী ক্যাটাগরি মেনু
         keyboard = [
             [InlineKeyboardButton("🌐 AUTHMSG (10 Ranges)", callback_data="cat_authmsg")],
             [InlineKeyboardButton("⚡ BOLT (1 Ranges)", callback_data="cat_bolt")],
@@ -247,7 +234,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            "📊 **Live Traffic Panel**\nপ্যানেলের সকল সক্রিয় রেঞ্জ ধারাবাহিক ও সিরিয়াল অনুযায়ী নিচে দেওয়া হলো:",
+            "📊 **Live Traffic Panel**\nPanel er sokol active range serial onujayi niche dewa holo:",
             parse_mode="Markdown",
             reply_markup=reply_markup
         )
@@ -259,8 +246,8 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
             "💳 **Account Balance Details**\n\n"
-            "💰 **Rate:** প্রতি OTP ২০ পয়সা (৳০.২০)\n"
-            "💼 **Available Balance:** ৳০.০০", 
+            "💰 **Rate:** Proti OTP 20 poysa (৳0.20)\n"
+            "💼 **Available Balance:** ৳0.00", 
             parse_mode="Markdown", 
             reply_markup=reply_markup
         )
@@ -269,7 +256,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         keyboard = [[InlineKeyboardButton("💬 Support Agent", url=f"https://t.me/{SUPPORT_USERNAME}")]],
         reply_markup = InlineKeyboardMarkup(keyboard[0])
         await update.message.reply_text(
-            f"💬 **Support Center**\nযেকোনো সমস্যায় সরাসরি যোগাযোগ করতে নিচের আইডিতে ক্লিক করুন: @{SUPPORT_USERNAME}", 
+            f"💬 **Support Center**\nShorasori jogajog korte nicher id te click korun: @{SUPPORT_USERNAME}", 
             parse_mode="Markdown", 
             reply_markup=reply_markup
         )
@@ -278,7 +265,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         keyboard = [[InlineKeyboardButton("📢 Join OTP Group", url=OTP_GROUP_LINK)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            "📢 **Official OTP Group:**\nনিচের বাটনে ক্লিক করে অফিশিয়াল গ্রুপে জয়েন করুন:", 
+            "📢 **Official OTP Group:**\nNicher button e click kore group e join korun:", 
             parse_mode="Markdown", 
             reply_markup=reply_markup
         )
@@ -289,51 +276,21 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     data = query.data
 
     if data == "back_home":
-        await query.message.edit_text("মূল মেনুতে ফিরে এসেছেন।")
+        await query.message.edit_text("Mukh menu te phire esechen.")
     elif data == "change_num":
-        await query.message.edit_text("🔄 নতুন আসল নাম্বার পাওয়ার জন্য আবার মূল মেনুর 'Get API Number' বাটনে ক্লিক করুন।")
+        await query.message.edit_text("🔄 Noton number pawar jonno abar 'Get API Number' button e click korun.")
     elif data == "refresh_traffic":
-        await query.message.edit_text("🔄 Live traffic synced successfully with panel sequentially.")
+        await query.message.edit_text("🔄 Live traffic synced successfully.")
     elif data == "close_menu":
         await query.message.delete()
     elif data.startswith("cat_"):
         cat_name = data.replace("cat_", "").upper()
-        
-        ranges_text = f"📂 **Service: {cat_name} Ranges (Serial Wise)**\n\n"
-        
-        if cat_name == "FACEBOOK":
-            ranges_text += (
-                "1️⃣ 🇨🇲 **Cameroon** | `23762XXX`\n"
-                "2️⃣ 🇧🇪 **Belgium** | `324685XXX`\n"
-                "3️⃣ 🇲🇬 **Madagascar** | `26134XXX`\n"
-                "4️⃣ 🇬🇳 **Guinea** | `22465XXX`\n"
-                "5️⃣ 🇨🇮 **Ivory Coast** | `22507XXX`\n"
-                "6️⃣ 🇹🇬 **Togo** | `22897XXX`\n"
-                "7️⃣ 🇲🇬 **Madagascar** | `26138XXX`\n"
-                "8️⃣ 🇹🇿 **Tanzania** | `25565XXX`\n"
-                "9️⃣ 🇦🇲 **Armenia** | `37455XXX`\n"
-                "🔟 🇲🇬 **Madagascar** | `2613XXX`\n"
-                "✨ *And sequential active ranges available...*"
-            )
-        elif cat_name == "WHATSAPP":
-            ranges_text += (
-                "1️⃣ 🇲🇬 **Madagascar** | `26138XXX`\n"
-                "2️⃣ 🇹🇬 **Togo** | `22899XXX`\n"
-                "3️⃣ 🇹🇬 **Togo** | `22898XXX`\n"
-                "4️⃣ 🇲🇬 **Madagascar** | `26134XXX`\n"
-                "5️⃣ 🇹🇬 **Togo** | `22896XXX`"
-            )
-        else:
-            ranges_text += (
-                f"1️⃣ 🟢 **Primary Server Range** | `Active Line`\n"
-                f"📌 Sequential active ranges for {cat_name} are currently online."
-            )
-
+        ranges_text = f"📂 **Service: {cat_name} Ranges**\n\n1️⃣ **Primary Range** | `Active Line`\n"
         await query.message.edit_text(
             ranges_text,
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 Back to Traffic", callback_data="back_to_traffic")]
+                [InlineKeyboardButton("🔙 Back", callback_data="back_to_traffic")]
             ])
         )
     elif data == "back_to_traffic":
@@ -350,19 +307,10 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             [InlineKeyboardButton("🔄 Refresh", callback_data="refresh_traffic"), InlineKeyboardButton("❌ Close", callback_data="close_menu")]
         ]
         await query.message.edit_text(
-            "📊 **Live Traffic Panel**\nপ্যানেলের সকল সক্রিয় রেঞ্জ ধারাবাহিক ও সিরিয়াল অনুযায়ী নিচে দেওয়া হলো:",
+            "📊 **Live Traffic Panel**",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-    else:
-        await query.answer("সম্পন্ন হয়েছে!", show_alert=False)
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logger.error("Telegram error occurred:", exc_info=context.error)
-
-# =========================================================
-# MAIN
-# =========================================================
 
 async def main():
     global application
@@ -371,14 +319,12 @@ async def main():
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
     application.add_handler(CallbackQueryHandler(button_callback_handler))
-    application.add_error_handler(error_handler)
 
     logger.info("Starting Telegram bot...")
     await application.initialize()
     await application.start()
 
     asyncio.create_task(check_mino_otp_loop())
-
     await application.updater.start_polling(drop_pending_updates=True)
 
     while True:
@@ -392,5 +338,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Bot stopped.")
-    except Exception as e:
-        logger.error(f"Fatal crash error: {e}")
