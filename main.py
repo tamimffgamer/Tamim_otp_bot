@@ -161,7 +161,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         
         if not target_range or target_range == "Not Set":
             await update.message.reply_text(
-                "⚠️ **Range Set Kora Nei!**\nProthome '⚙️ Set Range' button-e click kore apnar target range (jemon: `23762`) set kore nin.",
+                "⚠️ **Range Set Kora Nei!**\nProthome '⚙️ Set Range' button-e click kore apnar target range (jemon: `88017XXX`) set kore nin.",
                 parse_mode="Markdown",
                 reply_markup=get_main_keyboard()
             )
@@ -169,14 +169,18 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         fetched_number = "Loading from API..."
         try:
-            # Mino SMS API URL with user's selected range parameter (rid)
-            url = f"{MINO_BASE_URL}/getnumber.php?api_key={MINO_API_KEY}&rid={target_range}"
+            # Mino SMS API documentation-er shathe mil rekhe POST request kora holo
+            url = f"{MINO_BASE_URL}/getnumber.php"
+            headers = {"mauthapi": MINO_API_KEY}
+            payload = {"rid": target_range}
             
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as resp:
+                async with session.post(url, headers=headers, json=payload, timeout=10) as resp:
                     if resp.status == 200:
                         res_data = await resp.json()
-                        fetched_number = res_data.get("number") or res_data.get("phone") or res_data.get("data") or "No Number Found in this Range"
+                        fetched_number = res_data.get("number") or res_data.get("phone") or res_data.get("data") or res_data.get("result") or str(res_data)
+                    else:
+                        fetched_number = f"API Error: Status {resp.status}"
         except Exception as e:
             logger.error(f"API fetch error: {e}")
             fetched_number = "API Connection Error"
@@ -196,7 +200,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
     elif "Set Range" in text:
         context.user_data["waiting_for_range"] = True
-        await update.message.reply_text("🔴 Please send your target number range (e.g., `23762XXX`):", parse_mode="Markdown")
+        await update.message.reply_text("🔴 Please send your target number range (e.g., `88017XXX`):", parse_mode="Markdown")
 
     elif "Live Traffic" in text:
         keyboard = [
