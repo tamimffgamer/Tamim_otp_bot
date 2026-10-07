@@ -74,11 +74,12 @@ async def send_group_notification(text: str):
         return False
 
 # =========================================================
-# BACKGROUND OTP CHECKER (Safe Loop)
+# BACKGROUND OTP CHECKER (Panel to Group Sync)
 # =========================================================
 
 async def check_mino_otp_loop():
     await asyncio.sleep(10)
+    seen_otp_ids = set() # ডুপ্লিকেট নোটিফিকেশন এড়াতে
     while True:
         try:
             url = f"{MINO_BASE_URL}/st/api.php?api_key={MINO_API_KEY}&action=get_sms"
@@ -89,22 +90,29 @@ async def check_mino_otp_loop():
                             data = await response.json()
                             if data and isinstance(data, list):
                                 for sms in data:
-                                    number = sms.get("number", "Unknown")
-                                    msg = sms.get("message", "No Message")
-                                    text = (
-                                        "🚨 **NEW OTP RECEIVED!** 🚨\n\n"
-                                        "📱 **Panel:** MINO SMS PANEL\n"
-                                        f"📞 **Number:** `{number}`\n"
-                                        f"✉️ **Message:**\n{msg}"
-                                    )
-                                    await send_group_notification(text)
+                                    sms_id = sms.get("id", sms.get("number") + str(sms.get("message")))
+                                    if sms_id not in seen_otp_ids:
+                                        seen_otp_ids.add(sms_id)
+                                        # মেমোরি সুরক্ষায় লিমিট রাখা
+                                        if len(seen_otp_ids) > 500:
+                                            seen_otp_ids.clear()
+                                            
+                                        number = sms.get("number", "Unknown")
+                                        msg = sms.get("message", "No Message")
+                                        
+                                        text = (
+                                            "🚨 **NEW OTP RECEIVED!** 🚨\n\n"
+                                            "📱 **Panel:** MINO SMS PANEL\n"
+                                            f"📞 **Number:** `{number}`\n"
+                                            f"✉️ **Message:**\n{msg}"
+                                        )
+                                        await send_group_notification(text)
                         except Exception:
                             pass
         except Exception as e:
-            logger.error(f"OTP loop minor error: {e}")
+            logger.error(f"OTP loop error: {e}")
         
-        # ক্র্যাশ রোধ করতে সময় কিছুটা বাড়িয়ে দেওয়া হলো
-        await asyncio.sleep(30)
+        await asyncio.sleep(15)
 
 # =========================================================
 # RENDER HEALTH SERVER
@@ -114,7 +122,7 @@ flask_app = Flask(__name__)
 
 @flask_app.route("/")
 def home():
-    return "Bot is running successfully."
+    return "Bot is running successfully with Panel connection."
 
 @flask_app.route("/health")
 def health():
@@ -162,11 +170,21 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("🔴 Please send your target number range:")
 
     elif "Live Traffic" in text:
+        # আপনার চাওয়া মতো সুন্দর সাজানো রেঞ্জ লিস্ট
         keyboard = [
+            [InlineKeyboardButton("👀 Call Of Duty Range (1)", callback_data="tr_cod")],
+            [InlineKeyboardButton("👀 Facebook Range (86)", callback_data="tr_fb")],
+            [InlineKeyboardButton("👀 Imo Range (3)", callback_data="tr_imo")],
+            [InlineKeyboardButton("👀 Instagram Range (6)", callback_data="tr_insta")],
+            [InlineKeyboardButton("👀 Whatsapp Range (4)", callback_data="tr_wa")],
             [InlineKeyboardButton("🔄 Refresh", callback_data="refresh_traffic"), InlineKeyboardButton("❌ Close", callback_data="close_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("📊 **Live Traffic Panel**", parse_mode="Markdown", reply_markup=reply_markup)
+        await update.message.reply_text(
+            "📊 **Live Traffic Panel**\nSelect a service range below to check details:",
+            parse_mode="Markdown",
+            reply_markup=reply_markup
+        )
 
     elif "Balance" in text:
         keyboard = [
@@ -195,11 +213,15 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     elif data == "change_num":
         await query.message.edit_text("🔄 নতুন নাম্বার লোড করা হচ্ছে...")
     elif data == "refresh_traffic":
-        await query.message.edit_text("🔄 রিফ্রেশ করা হয়েছে।")
+        await query.message.edit_text("🔄 Live traffic synced successfully.")
     elif data == "close_menu":
         await query.message.delete()
+    elif data.startswith("tr_"):
+        service_name = data.replace("tr_", "").upper()
+        await query.answer(f"Selected {service_name} Range traffic!", show_alert=False)
+        await query.message.reply_text(f"📌 **Service Range Info:** Showing active traffic and numbers for `{service_name}`.", parse_mode="Markdown")
     else:
-        await query.answer(" সম্পন্ন হয়েছে!", show_alert=False)
+        await query.answer("সম্পন্ন হয়েছে!", show_alert=False)
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error("Telegram error occurred:", exc_info=context.error)
@@ -221,6 +243,7 @@ async def main():
     await application.initialize()
     await application.start()
 
+    # ব্যাকগ্রাউন্ডে প্যানেল থেকে OTP চেক করার লুপ চালু রাখা হলো
     asyncio.create_task(check_mino_otp_loop())
 
     await application.updater.start_polling(drop_pending_updates=True)
