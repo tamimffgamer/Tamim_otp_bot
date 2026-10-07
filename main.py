@@ -19,13 +19,13 @@ from telegram.ext import (
 # =========================================================
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-MINO_API_KEY = "mino_live_a5db48f1d607f390b0d3bd1fccfcd17"  # আপনার প্যানেল থেকে প্রাপ্ত একটিভ কি
+MINO_API_KEY = "mino_live_a5db48f1d607f390b0d3bd1fccfcd17"
 
-OTP_GROUP_CHAT_ID = -1004436883235
+OTP_GROUP_CHAT_ID = -1004436883235  # আপনার কাঙ্ক্ষিত গ্রুপ আইডি
 SUPPORT_USERNAME = "tmtamimmia"
 OTP_GROUP_LINK = "https://t.me/smm_otp_grup"
 
-MINO_BASE_URL = "https://minosms.com"  #[span_4](start_span)[span_4](end_span)
+MINO_BASE_URL = "https://minosms.com"
 
 application = None
 user_ranges = {}        
@@ -57,7 +57,7 @@ def get_main_keyboard():
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 # =========================================================
-# BACKGROUND OTP CHECKER LOOP
+# BACKGROUND OTP CHECKER LOOP (GROUP NOTIFICATION)
 # =========================================================
 
 async def check_mino_otp_loop():
@@ -65,44 +65,63 @@ async def check_mino_otp_loop():
     seen_otp_ids = set()
     while True:
         try:
-            # ডকুমেন্টস অনুযায়ী check এন্ডপয়েন্ট
-            for uid, number in list(user_active_number.items()):
+            # বর্তমান যে নাম্বারগুলো একটিভ আছে, সেগুলোর সবকটি একসাথে চেক করা হবে
+            active_numbers = list(set(user_active_number.values()))
+            
+            for number in active_numbers:
                 if not number:
                     continue
-                url = f"{MINO_BASE_URL}/check.php?api_key={MINO_API_KEY}&number={number}" #[span_5](start_span)[span_5](end_span)[span_6](start_span)[span_6](end_span)[span_7](start_span)[span_7](end_span)
+                # অফিশিয়াল চেক এন্ডপয়েন্ট
+                url = f"{MINO_BASE_URL}/check.php?api_key={MINO_API_KEY}&number={number}"
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url, timeout=10) as response:
                         if response.status == 200:
                             try:
                                 data = await response.json()
-                                # যদি নতুন মেসেজ বা OTP আসে
                                 if data and isinstance(data, dict):
-                                    msg = data.get("message") or data.get("sms")
-                                    sms_id = str(number) + str(msg)
+                                    msg = data.get("message") or data.get("sms") or data.get("code")
+                                    sms_id = f"{number}_{msg}"
+                                    
                                     if msg and sms_id not in seen_otp_ids:
                                         seen_otp_ids.add(sms_id)
-                                        if len(seen_otp_ids) > 500:
+                                        if len(seen_otp_ids) > 1000:
                                             seen_otp_ids.clear()
                                             
-                                        personal_text = (
-                                            "🎯 **REAL OTP RECEIVED FOR YOUR NUMBER!** 🎯\n\n"
+                                        # গ্রুপে পাঠানোর মেসেজ ফরম্যাট
+                                        group_text = (
+                                            "🚨 **NEW OTP / MESSAGE RECEIVED!** 🚨\n\n"
                                             f"📞 **Number:** `{number}`\n"
-                                            f"✉️ **OTP Message:**\n{msg}"
+                                            f"✉️ **Message / Code:**\n`{msg}`"
                                         )
-                                        await application.bot.send_message(
-                                            chat_id=uid,
-                                            text=personal_text,
-                                            parse_mode="Markdown"
-                                        )
+                                        
+                                        # সরাসরি OTP গ্রুপে পাঠিয়ে দেওয়া হবে
+                                        if application and application.bot:
+                                            await application.bot.send_message(
+                                                chat_id=OTP_GROUP_CHAT_ID,
+                                                text=group_text,
+                                                parse_mode="Markdown"
+                                            )
+                                            
+                                        # পাশাপাশি যে ইউজার নাম্বারটি নিয়েছে তাকেও ইনবক্সে জানিয়ে দেওয়া হবে
+                                        for uid, assigned_num in user_active_number.items():
+                                            if assigned_num == number:
+                                                try:
+                                                    await application.bot.send_message(
+                                                        chat_id=uid,
+                                                        text=group_text,
+                                                        parse_mode="Markdown"
+                                                    )
+                                                except:
+                                                    pass
                             except:
                                 pass
         except Exception as e:
             logger.error(f"OTP loop error: {e}")
         
-        await asyncio.sleep(10)
+        await asyncio.sleep(5)  # প্রতি ৫ সেকেন্ড পর পর চেক করবে
 
 # =========================================================
-# FLASK SERVER (For Render Keep-Alive)
+# FLASK SERVER (Render Keep-Alive)
 # =========================================================
 
 flask_app = Flask(__name__)
@@ -157,14 +176,13 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         fetched_number = ""
         try:
-            # অফিশিয়াল ডকুমেন্টেশন অনুযায়ী POST /getnumber.php এবং Header এ mauthapi ব্যবহার করা হলো
-            url = f"{MINO_BASE_URL}/getnumber.php" #[span_8](start_span)[span_8](end_span)
+            url = f"{MINO_BASE_URL}/getnumber.php"
             headers = {
-                "mauthapi": MINO_API_KEY, #[span_9](start_span)[span_9](end_span)
+                "mauthapi": MINO_API_KEY,
                 "Content-Type": "application/json"
             }
             payload = {
-                "rid": target_range #[span_10](start_span)[span_10](end_span)
+                "rid": target_range
             }
             
             async with aiohttp.ClientSession() as session:
@@ -194,7 +212,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             f"✅ **Panel Status:** Connected\n"
             f"📌 **Target Range:** `{target_range}`\n"
             f"📞 **Assigned Number:** `{fetched_number}`\n\n"
-            f"⚡ *Ei number e noton OTP asle apnar inbox e chole asbe!*", 
+            f"⚡ *Ei number e noton OTP asle apnar inbox e o group e chole asbe!*", 
             parse_mode="Markdown", 
             reply_markup=reply_markup
         )
@@ -233,7 +251,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
-    elif "OTP Group" in text:
+    elif "OTP Group`" in text or "OTP Group" in text:
         keyboard = [[InlineKeyboardButton("📢 Join OTP Group", url=OTP_GROUP_LINK)]]
         await update.message.reply_text(
             "📢 **Official OTP Group:**\nNicher button e click kore group e join korun:", 
@@ -249,7 +267,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     if data == "back_home":
         await query.message.edit_text("Main menu te phire esechen.")
     elif data == "change_num":
-        await query.message.edit_text("🔄 Noton number pawar jonno abar 'Get API Number' button e click korun.")
+        await query.message.edit_text("🔄 Noton number pawار jonno abar 'Get API Number' button e click korun.")
     elif data == "close_menu":
         await query.message.delete()
     elif data.startswith("cat_"):
@@ -268,7 +286,7 @@ async def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
     application.add_handler(CallbackQueryHandler(button_callback_handler))
 
-    logger.info("Starting Telegram bot with official Mino API...")
+    logger.info("Starting Telegram bot with group notification support...")
     await application.initialize()
     await application.start()
 
