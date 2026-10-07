@@ -157,7 +157,7 @@ async def auto_forward_console_logs(application):
                             
                             _, _, flag = get_country_info(num, country)
                             
-                            # ১. প্যানেলের সকল কোড যেভাবে মেইন গ্রুপে ফরোয়ার্ড হয়
+                            # ১. প্যানেলের সকল কোড মেইন গ্রুপে ফরোয়ার্ড করা
                             group_text = (
                                 f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
                                 f"📘 <b>{service} OTP RECEIVE</b>\n\n"
@@ -180,7 +180,7 @@ async def auto_forward_console_logs(application):
                             except Exception as ex:
                                 print(f"Group Forward Error: {ex}")
 
-                            # ২. বট থেকে নেওয়া নাম্বারে ২০ মিনিটের মধ্যে নতুন কোড আসলে ইনবক্সে পাঠানো (ফিক্সড ম্যাচিং)
+                            # ২. নিখুঁত এক্সাক্ট ম্যাচিং লজিক (শুধুমাত্র আপনার নেওয়া সঠিক নাম্বারের কোড ইনবক্সে যাবে)
                             clean_log_num = ''.join(filter(str.isdigit, num))
                             
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
@@ -195,12 +195,8 @@ async def auto_forward_console_logs(application):
                                 
                                 matched = False
                                 if clean_u_phone and clean_log_num:
-                                    if (clean_u_phone == clean_log_num or 
-                                        clean_log_num.endswith(clean_u_phone) or 
-                                        clean_u_phone.endswith(clean_log_num) or
-                                        clean_log_num.find(clean_u_phone) != -1 or
-                                        clean_u_phone.find(clean_log_num) != -1 or
-                                        (len(clean_u_phone) >= 7 and clean_u_phone[-7:] == clean_log_num[-7:])):
+                                    # প্যানেলের নাম্বার এবং ইউজারের নাম্বার সম্পূর্ণ হুবহু মিলতে হবে
+                                    if clean_u_phone == clean_log_num:
                                         matched = True
 
                                 if matched:
