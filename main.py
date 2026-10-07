@@ -104,7 +104,6 @@ async def fetch_live_traffic_detailed():
 
 async def auto_forward_console_logs(application):
     await asyncio.sleep(2)
-    # Startup e purono logs gulo seen set e add kore dewa hocche jate bot start howar sathe sathe purono message group-e spam na kore
     try:
         headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
         res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=5.0)
@@ -156,8 +155,6 @@ async def auto_forward_console_logs(application):
                             if len(SEEN_OTP_IDS) > 4000:
                                 SEEN_OTP_IDS.pop()
                             
-                            print(f"DEBUG HIT: Number={num} | Msg={msg}")
-                            
                             _, _, flag = get_country_info(num, country)
                             
                             group_text = (
@@ -187,8 +184,7 @@ async def auto_forward_console_logs(application):
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 req_time = u_info.get("req_time", 0)
                                 
-                                # 30 minutes (1800 seconds) er moddhe asha message consider hobe
-                                if current_loop_time < req_time or (current_loop_time - req_time) > 1800:
+                                if current_loop_time < req_time or (current_loop_time - req_time) > 3600:
                                     continue
 
                                 u_phone = str(u_info.get("phone", ""))
@@ -199,6 +195,8 @@ async def auto_forward_console_logs(application):
                                     if (clean_u_phone == clean_log_num or 
                                         clean_log_num.endswith(clean_u_phone) or 
                                         clean_u_phone.endswith(clean_log_num) or
+                                        clean_u_phone in clean_log_num or
+                                        clean_log_num in clean_u_phone or
                                         (len(clean_u_phone) >= 7 and clean_u_phone[-7:] == clean_log_num[-7:])):
                                         matched = True
 
@@ -306,7 +304,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
 
         country_name, _, flag = get_country_info(phone)
-        header_text = f"✅ <b>Number:</b> {flag} {country_name}\n\nEkhon ei number-ti te OTP pathale sathe sathe apnake real code ekhane pathiye dewa hobe!"
+        header_text = f"✅ <b>Number:</b> {flag} {country_name}\n\nEkhon ei number-ti te OTP pathale sathe sathe apnar inbox-e real code chole asbe!"
         reply_markup = create_single_number_markup(phone)
         await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
 
@@ -481,4 +479,3 @@ if __name__ == '__main__':
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
     app.run_polling()
-
