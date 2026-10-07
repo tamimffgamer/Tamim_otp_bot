@@ -317,7 +317,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ranges = services.get(sid, [])
         
         keyboard = []
-        for r in ranges[:10]: # সর্বোচ্চ ১০টি রেঞ্জ দেখাবে
+        for r in ranges[:10]:
             country_name, _, flag = get_country_info(r)
             keyboard.append([InlineKeyboardButton(f"{flag} {country_name} | {r}XXX", callback_data=f"selrange_{r}")])
         keyboard.append([InlineKeyboardButton("🔙 Back to Services", callback_data="back_services")])
@@ -386,8 +386,9 @@ async def post_init(application):
     asyncio.create_task(auto_forward_console_logs(application))
 
 if __name__ == '__main__':
-    app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).drop_pending_updates(True).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler('start', start))
+    app.add_handler(CommandHandler('help', help_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
