@@ -149,26 +149,26 @@ async def auto_forward_console_logs(application):
                         service = hit.get("service", "SMS")
                         country = hit.get("country", "Cameroon")
 
+                        _, _, flag = get_country_info(num, country)
+                        
+                        # ১. প্যানেলের সকল কোড মেইন গ্রুপে ফরোয়ার্ড করা
+                        group_text = (
+                            f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
+                            f"📘 <b>{service} OTP RECEIVE</b>\n\n"
+                            f"🌍 <b>Country :</b> {country} ({flag})\n"
+                            f"🎯 <b>Number :</b> <code>{num}</code>\n"
+                            f"🗣 <b>Language :</b> English\n\n"
+                            f"✉ <b>Message :</b>\n<code>{msg}</code>"
+                        )
+                        group_markup = InlineKeyboardMarkup([
+                            [InlineKeyboardButton("NUMBER BOT ↗", url=f"https://t.me/{application.bot.username}")]
+                        ])
+                        
                         log_id = f"{num}_{msg}"
                         if log_id not in SEEN_OTP_IDS:
                             SEEN_OTP_IDS.add(log_id)
                             if len(SEEN_OTP_IDS) > 4000:
                                 SEEN_OTP_IDS.pop()
-                            
-                            _, _, flag = get_country_info(num, country)
-                            
-                            # ১. প্যানেলের সকল কোড মেইন গ্রুপে ফরোয়ার্ড করা
-                            group_text = (
-                                f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
-                                f"📘 <b>{service} OTP RECEIVE</b>\n\n"
-                                f"🌍 <b>Country :</b> {country} ({flag})\n"
-                                f"🎯 <b>Number :</b> <code>{num}</code>\n"
-                                f"🗣 <b>Language :</b> English\n\n"
-                                f"✉ <b>Message :</b>\n<code>{msg}</code>"
-                            )
-                            group_markup = InlineKeyboardMarkup([
-                                [InlineKeyboardButton("NUMBER BOT ↗", url=f"https://t.me/{application.bot.username}")]
-                            ])
                             
                             try:
                                 await application.bot.send_message(
@@ -180,53 +180,53 @@ async def auto_forward_console_logs(application):
                             except Exception as ex:
                                 print(f"Group Forward Error: {ex}")
 
-                            # ২. নিখুঁত এক্সাক্ট ম্যাচিং লজিক (শুধুমাত্র আপনার নেওয়া সঠিক নাম্বারের কোড ইনবক্সে যাবে)
-                            clean_log_num = ''.join(filter(str.isdigit, num))
+                        # ২. নিখুঁত এক্সাক্ট ম্যাচিং লজিক (২০ মিনিটের মধ্যে সঠিক নাম্বারে কোড আসলে ইনবক্সে পাঠানো)
+                        clean_log_num = ''.join(filter(str.isdigit, num))
+                        
+                        for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
+                            req_time = u_info.get("req_time", 0)
                             
-                            for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
-                                req_time = u_info.get("req_time", 0)
-                                
-                                # ২০ মিনিট (১২০০ সেকেন্ড) সময়সীমা চেক
-                                if current_loop_time < req_time or (current_loop_time - req_time) > 1200:
-                                    continue
+                            # ২০ মিনিট (১২০০ সেকেন্ড) সময়সীমা চেক
+                            if current_loop_time < req_time or (current_loop_time - req_time) > 1200:
+                                continue
 
-                                u_phone = str(u_info.get("phone", ""))
-                                clean_u_phone = ''.join(filter(str.isdigit, u_phone))
-                                
-                                matched = False
-                                if clean_u_phone and clean_log_num:
-                                    # প্যানেলের নাম্বার এবং ইউজারের নাম্বার সম্পূর্ণ হুবহু মিলতে হবে
-                                    if clean_u_phone == clean_log_num:
-                                        matched = True
+                            u_phone = str(u_info.get("phone", ""))
+                            clean_u_phone = ''.join(filter(str.isdigit, u_phone))
+                            
+                            matched = False
+                            if clean_u_phone and clean_log_num:
+                                # প্যানেলের নাম্বার এবং ইউজারের নাম্বার যেকোনো একটি শেষের অংশ বা সম্পূর্ণ মিললে গ্রহণ করবে
+                                if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone) or clean_u_phone.endswith(clean_log_num):
+                                    matched = True
 
-                                if matched:
-                                    match_otp = re.search(r'\b\d{4,8}\b', msg)
-                                    otp_code = match_otp.group(0) if match_otp else msg
+                            if matched:
+                                match_otp = re.search(r'\b\d{4,8}\b', msg)
+                                otp_code = match_otp.group(0) if match_otp else msg
+                                
+                                sent_set = u_info.setdefault("sent_otps", set())
+                                if otp_code not in sent_set:
+                                    sent_set.add(otp_code)
+                                    current_bal = USER_BALANCES.get(user_id, 0.0)
+                                    USER_BALANCES[user_id] = current_bal + 0.00122
                                     
-                                    sent_set = u_info.setdefault("sent_otps", set())
-                                    if otp_code not in sent_set:
-                                        sent_set.add(otp_code)
-                                        current_bal = USER_BALANCES.get(user_id, 0.0)
-                                        USER_BALANCES[user_id] = current_bal + 0.00122
-                                        
-                                        personal_text = (
-                                            f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
-                                            f"🚨 <b>YOUR NUMBER OTP RECEIVE</b>\n\n"
-                                            f"📘 <b>Service :</b> {service}\n"
-                                            f"🌍 <b>Country :</b> {country} ({flag})\n"
-                                            f"🎯 <b>Number :</b> <code>{u_phone}</code>\n"
-                                            f"🔑 <b>OTP Code :</b> <code>{otp_code}</code>\n\n"
-                                            f"✉ <b>Full Message :</b>\n<code>{msg}</code>\n\n"
-                                            f"💰 <b>Earned:</b> +$0.00122"
+                                    personal_text = (
+                                        f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
+                                        f"🚨 <b>YOUR NUMBER OTP RECEIVE</b>\n\n"
+                                        f"📘 <b>Service :</b> {service}\n"
+                                        f"🌍 <b>Country :</b> {country} ({flag})\n"
+                                        f"🎯 <b>Number :</b> <code>{u_phone}</code>\n"
+                                        f"🔑 <b>OTP Code :</b> <code>{otp_code}</code>\n\n"
+                                        f"✉ <b>Full Message :</b>\n<code>{msg}</code>\n\n"
+                                        f"💰 <b>Earned:</b> +$0.00122"
+                                    )
+                                    try:
+                                        await application.bot.send_message(
+                                            chat_id=u_info["chat_id"], 
+                                            text=personal_text, 
+                                            parse_mode="HTML"
                                         )
-                                        try:
-                                            await application.bot.send_message(
-                                                chat_id=u_info["chat_id"], 
-                                                text=personal_text, 
-                                                parse_mode="HTML"
-                                            )
-                                        except Exception as per_ex:
-                                            print(f"Personal Send Error: {per_ex}")
+                                    except Exception as per_ex:
+                                        print(f"Personal Send Error: {per_ex}")
         except Exception as e:
             print(f"Background Loop Error: {e}")
         await asyncio.sleep(2)
