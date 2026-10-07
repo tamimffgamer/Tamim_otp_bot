@@ -276,7 +276,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif "Live Traffic" in text:
         USER_STATES[user_id] = None
         sorted_ranges, total_hits = await fetch_live_traffic_from_panel()
-        traffic_lines = ["📊 <b>Live Traffic (Sequential)</b>\n", f"📋 <b>Total Hits:</b> {total_hits}\n", "📥 <b>Range List (Dharabahibabe):</b>"]
+        traffic_lines = ["📊 <b>Live Traffic (Sequential)</b>\n", f"📋 <b>Total Hits:</b> {total_hits}\n", "📥 <b>Range List (ধারাবাহিক ভাবে):</b>"]
         if sorted_ranges:
             for idx, (r, info) in enumerate(sorted_ranges, 1):
                 _, _, flag = get_country_info(r)
