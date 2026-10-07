@@ -176,8 +176,8 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         fetched_number = "Loading from API..."
         try:
-            # Panel er sathe match kore sothik endpoint parameters deya holo
-            url = f"{MINO_BASE_URL}/st/api.php?api_key={MINO_API_KEY}&action=getnumber&rid={target_range}"
+            # 404 error dur korar jonno sothik action endpoints trial kora hocche
+            url = f"{MINO_BASE_URL}/st/api.php?api_key={MINO_API_KEY}&action=number&rid={target_range}"
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=10) as resp:
@@ -193,7 +193,17 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                         except:
                             fetched_number = await resp.text()
                     else:
-                        fetched_number = f"API Error: Status {resp.status}"
+                        # Jodi action=number kaj na kore, tahole alternative endpoint try hobe
+                        alt_url = f"{MINO_BASE_URL}/st/api.php?api_key={MINO_API_KEY}&action=get_number&rid={target_range}"
+                        async with session.get(alt_url, timeout=10) as alt_resp:
+                            if alt_resp.status == 200:
+                                try:
+                                    res_data = await alt_resp.json()
+                                    fetched_number = res_data.get("number") or res_data.get("phone") or res_data.get("data") or str(res_data)
+                                except:
+                                    fetched_number = await alt_resp.text()
+                            else:
+                                fetched_number = f"API Error: Status {resp.status}"
         except Exception as e:
             logger.error(f"API fetch error: {e}")
             fetched_number = "API Connection Error"
