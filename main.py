@@ -18,7 +18,7 @@ USER_STATES = {}
 USER_RANGES = {}
 USER_BALANCES = {}  
 USER_WITHDRAW_INFO = {} 
-SEEN_CONSOLE_MESSAGES = set()
+GLOBAL_SEEN_LOGS = set()
 ACTIVE_USER_NUMBERS = {} 
 
 def get_country_info(phone_number, api_country=""):
@@ -38,7 +38,7 @@ def get_country_info(phone_number, api_country=""):
     elif clean_num.startswith("237"): return "Cameroon", "CM", "🇨🇲"
     elif clean_num.startswith("225"): return "Ivory Coast", "CI", "🇨🇮"
     elif clean_num.startswith("228"): return "Togo", "TG", "TG"
-    elif clean_num.startswith("261"): return "Madagascar", "MG", "MG"
+    elif clean_num.startswith("261"): return "Madagascar", "MG", "🇲🇬"
     else: return "International", "INT", "🌍"
 
 def _sync_get_mino_real_number(target_range):
@@ -102,8 +102,8 @@ def _sync_fetch_live_traffic_detailed():
 async def fetch_live_traffic_detailed():
     return await asyncio.to_thread(_sync_fetch_live_traffic_detailed)
 
-def fetch_current_console_snapshot():
-    current_messages = set()
+def fetch_current_console_messages():
+    messages_map = {}
     try:
         headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
         res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=4.0)
@@ -119,16 +119,18 @@ def fetch_current_console_snapshot():
                         hit.get("to") or hit.get("range", "")
                     )
                     if msg and num:
-                        current_messages.add(f"{num}_{msg}")
+                        clean_num = ''.join(filter(str.isdigit, num))
+                        match_otp = re.search(r'\b\d{4,8}\b', msg)
+                        if match_otp:
+                            otp = match_otp.group(0)
+                            if clean_num not in messages_map:
+                                messages_map[clean_num] = set()
+                            messages_map[clean_num].add(otp)
     except Exception as e:
-        print(f"Snapshot Error: {e}")
-    return current_messages
+        print(f"Console Map Error: {e}")
+    return messages_map
 
 async def auto_forward_console_logs(application):
-    initial_snapshot = await asyncio.to_thread(fetch_current_console_snapshot)
-    for item in initial_snapshot:
-        SEEN_CONSOLE_MESSAGES.add(item)
-
     while True:
         try:
             headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
@@ -161,14 +163,16 @@ async def auto_forward_console_logs(application):
                         )
                         service = hit.get("service", "SMS")
                         country = hit.get("country", "Cameroon")
+                        otp_code = match_otp.group(0)
 
-                        log_id = f"{num}_{msg}"
                         clean_log_num = ''.join(filter(str.isdigit, num))
-                        
+                        log_unique_key = f"{clean_log_num}_{otp_code}"
+
+                        # 1. Check against active user sessions
                         for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                             req_time = u_info.get("req_time", 0)
                             
-                            # STRICT CHECK: Message must arrive strictly AFTER the user clicked/requested the number AND within 20 minutes (1200s)
+                            # Must be within 20 minutes (1200 seconds) of getting the number AND strictly after req_time
                             if current_loop_time < req_time or (current_loop_time - req_time) > 1200:
                                 continue
 
@@ -186,43 +190,37 @@ async def auto_forward_console_logs(application):
                                     matched = True
 
                             if matched:
-                                session_seen = u_info.setdefault("session_seen_logs", set())
-                                if log_id not in session_seen:
-                                    session_seen.add(log_id)
+                                ignored_otps = u_info.get("ignored_old_otps", set())
+                                if otp_code in ignored_otps:
+                                    continue # Skip old/pre-existing fake codes completely!
+
+                                sent_set = u_info.setdefault("sent_otps", set())
+                                if otp_code not in sent_set:
+                                    sent_set.add(otp_code)
+                                    current_bal = USER_BALANCES.get(user_id, 0.0)
+                                    USER_BALANCES[user_id] = current_bal + 0.00122
                                     
-                                    # Extra check: Ignore log if its unique identifier or text was already present in initial snapshot before user requested the number
-                                    initial_snapshot_set = u_info.get("initial_snapshot", set())
-                                    if log_id in initial_snapshot_set:
-                                        continue
-
-                                    otp_code = match_otp.group(0)
-                                    sent_set = u_info.setdefault("sent_otps", set())
-                                    if otp_code not in sent_set:
-                                        sent_set.add(otp_code)
-                                        current_bal = USER_BALANCES.get(user_id, 0.0)
-                                        USER_BALANCES[user_id] = current_bal + 0.00122
-                                        
-                                        personal_text = (
-                                            f"🚨 <b>REAL OTP RECEIVED FOR YOUR NUMBER!</b> 🚨\n\n"
-                                            f"📱 <b>Number:</b> <code>{u_phone}</code>\n"
-                                            f"🔑 <b>OTP Code:</b> <code>{otp_code}</code>\n"
-                                            f"✉ <b>Full SMS:</b> <code>{msg}</code>\n"
-                                            f"💰 <b>Earned:</b> +$0.00122"
+                                    personal_text = (
+                                        f"🚨 <b>REAL OTP RECEIVED FOR YOUR NUMBER!</b> 🚨\n\n"
+                                        f"📱 <b>Number:</b> <code>{u_phone}</code>\n"
+                                        f"🔑 <b>OTP Code:</b> <code>{otp_code}</code>\n"
+                                        f"✉ <b>Full SMS:</b> <code>{msg}</code>\n"
+                                        f"💰 <b>Earned:</b> +$0.00122"
+                                    )
+                                    try:
+                                        await application.bot.send_message(
+                                            chat_id=u_info["chat_id"], 
+                                            text=personal_text, 
+                                            parse_mode="HTML"
                                         )
-                                        try:
-                                            await application.bot.send_message(
-                                                chat_id=u_info["chat_id"], 
-                                                text=personal_text, 
-                                                parse_mode="HTML"
-                                            )
-                                        except Exception as per_ex:
-                                            print(f"Personal Send Error: {per_ex}")
+                                    except Exception as per_ex:
+                                        print(f"Personal Send Error: {per_ex}")
 
-                        # Public group forward for brand new global live traffic
-                        if log_id not in SEEN_CONSOLE_MESSAGES:
-                            SEEN_CONSOLE_MESSAGES.add(log_id)
-                            if len(SEEN_CONSOLE_MESSAGES) > 5000:
-                                SEEN_CONSOLE_MESSAGES.pop()
+                        # 2. Public group forward
+                        if log_unique_key not in GLOBAL_SEEN_LOGS:
+                            GLOBAL_SEEN_LOGS.add(log_unique_key)
+                            if len(GLOBAL_SEEN_LOGS) > 5000:
+                                GLOBAL_SEEN_LOGS.pop()
                             
                             _, _, flag = get_country_info(num, country)
                             group_text = (
@@ -318,15 +316,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ No stock available for range <code>{user_range}</code>.", parse_mode="HTML")
             return
 
-        current_snapshot = await asyncio.to_thread(fetch_current_console_snapshot)
+        clean_phone = ''.join(filter(str.isdigit, phone))
+        console_map = await asyncio.to_thread(fetch_current_console_messages)
+        existing_otps = console_map.get(clean_phone, set())
 
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": update.effective_chat.id,
             "req_time": time.time(),
             "sent_otps": set(),
-            "session_seen_logs": set(),
-            "initial_snapshot": current_snapshot
+            "ignored_old_otps": existing_otps
         }
 
         country_name, _, flag = get_country_info(phone)
@@ -389,15 +388,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer(f"❌ No stock available for range {user_range}.", show_alert=True)
             return
 
-        current_snapshot = await asyncio.to_thread(fetch_current_console_snapshot)
+        clean_phone = ''.join(filter(str.isdigit, phone))
+        console_map = await asyncio.to_thread(fetch_current_console_messages)
+        existing_otps = console_map.get(clean_phone, set())
 
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": query.message.chat_id,
             "req_time": time.time(),
             "sent_otps": set(),
-            "session_seen_logs": set(),
-            "initial_snapshot": current_snapshot
+            "ignored_old_otps": existing_otps
         }
 
         country_name, _, flag = get_country_info(phone)
