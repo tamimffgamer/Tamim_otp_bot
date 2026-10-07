@@ -300,10 +300,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"💳 <b>Your Balance:</b> ${user_bal:.5f}\n📂 <b>Payout Info:</b> {saved_info}\n\n📌 <i>Minimum withdraw is $1.00</i>", reply_markup=balance_markup, parse_mode="HTML")
 
     elif "Support" in text:
-        await update.message.reply_text(f"💬 যোগাযোগ করুন: https://t.me/{SUPPORT_USERNAME}")
+        await update.message.reply_text(f"💬 jogajog korun: https://t.me/{SUPPORT_USERNAME}")
 
     elif "OTP Group" in text:
-        await update.message.reply_text(f"📣 জয়েন করুন: https://t.me/{YOUR_TELEGRAM_USERNAME}")
+        await update.message.reply_text(f"📣 joyen korun: https://t.me/{YOUR_TELEGRAM_USERNAME}")
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -394,7 +394,14 @@ if __name__ == '__main__':
     from http.server import HTTPServer, BaseHTTPRequestHandler
     import threading
     class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
-        do_GET = lambda self, *a: (self.send_response(200), self.end_headers(), self.wfile.write(b"Bot is running!"))
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Bot is running!")
+        def do_HEAD(self):
+            self.send_response(200)
+            self.end_headers()
+
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
