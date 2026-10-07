@@ -1,7 +1,8 @@
 import os
 import asyncio
 import logging
-import aiohttp
+import urllib.request
+import json
 from threading import Thread
 from flask import Flask, request, jsonify
 from telegram import Update
@@ -18,10 +19,10 @@ from telegram.ext import (
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 MINO_API_KEY = "mino_live_a5db48f1d607f390b0d3bd1fccfcd17"
 
-# Apnar OTP/notification group ID
+# আপনার OTP/notification group ID
 OTP_GROUP_CHAT_ID = -1004436883235
 
-# Apnar Telegram username
+# আপনার Telegram username
 SUPPORT_USERNAME = "tmtamimmia"
 
 # Mino SMS Base URL
@@ -48,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 if not BOT_TOKEN:
     raise RuntimeError(
-        "BOT_TOKEN paowa jayni. Render Environment Variables-e BOT_TOKEN din."
+        "BOT_TOKEN পাওয়া যায়নি। Render Environment Variables-এ BOT_TOKEN দিন।"
     )
 
 
@@ -58,7 +59,7 @@ if not BOT_TOKEN:
 
 async def send_group_notification(text: str):
     """
-    Telegram group-e notification pathanor function (Plain Text)।
+    Telegram group-এ notification পাঠানোর function।
     """
     try:
         if not application or not application.bot:
@@ -79,41 +80,38 @@ async def send_group_notification(text: str):
 
 
 # =========================================================
-# BACKGROUND OTP CHECKER (Mino SMS API Integration)
+# BACKGROUND OTP CHECKER (Using built-in urllib)
 # =========================================================
 
 async def check_mino_otp_loop():
     """
-    Mino API theke active number ba OTP check korar background task.
+    Mino API থেকে active number বা OTP চেক করার background task।
     """
-    await asyncio.sleep(10) # Bot start howar 10 second por cholbe
+    await asyncio.sleep(10)
     while True:
         try:
-            # Apni ekhane apnar target number ba active range diye check korte paren
-            # Udahoron sस्वरूप: /check.php?api_key=...&number=...
-            # Ekhane amra ekta example endpoint hit korchi
-            async with aiohttp.ClientSession() as session:
-                url = f"{MINO_BASE_URL}/check.php"
-                params = {
-                    "api_key": MINO_API_KEY,
-                    "number": "+88017XXXXXXXX" # Ekhane apnar number ba range dite paren
-                }
-                async with session.get(url, params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        # Jodi kono notun message ba OTP ashe tahole group e pathabe
-                        if data and "message" in data:
-                            msg = data.get("message")
-                            text = (
-                                "📦 SMM NUMBER PANEL (Mino)\n"
-                                "━━━━━━━━━━━━━━━━━━━\n"
-                                f"✉️ Message :\n{msg}"
-                            )
-                            await send_group_notification(text)
+            # এখানে আপনার নির্দিষ্ট নাম্বার বা রেঞ্জ বসাতে হবে
+            target_number = "+88017XXXXXXXX"
+            url = f"{MINO_BASE_URL}/check.php?api_key={MINO_API_KEY}&number={target_number}"
+            
+            # Request পাঠানো
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=10) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode())
+                    if data and "message" in data:
+                        msg = data.get("message")
+                        text = (
+                            "📦 SMM NUMBER PANEL (Mino)\n"
+                            "━━━━━━━━━━━━━━━━━━━\n"
+                            f"✉️ Message :\n{msg}"
+                        )
+                        await send_group_notification(text)
         except Exception as e:
-            logger.error("Mino API check error: %s", e)
+            # যদি কোনো রেসপন্স না থাকে বা নাম্বার একটিভ না থাকে তবে লুপ থামবে না
+            pass
         
-        # Proti 30 second por por check korbe
+        # প্রতি ৩০ সেকেন্ড পর পর চেক করবে
         await asyncio.sleep(30)
 
 
@@ -159,9 +157,9 @@ async def start_command(
         f"👋 Hello {name}!\n\n"
         "🤖 Bot is online.\n\n"
         "Available commands:\n"
-        "🆔 /id - Apnar Telegram ID dekhun\n"
-        "🧪 /testgroup - Group connection porikkha korun\n"
-        "ℹ️ /status - Bot status dekhun"
+        "🆔 /id - আপনার Telegram ID দেখুন\n"
+        "🧪 /testgroup - Group connection পরীক্ষা করুন\n"
+        "ℹ️ /status - Bot status দেখুন"
     )
 
     await update.message.reply_text(text)
@@ -185,9 +183,9 @@ async def id_command(
 
 async def test_group_command(
     update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
+    context: ContextTypes.DEFAULT_URL if 'DEFAULT_URL' in globals() else ContextTypes.DEFAULT_TYPE,
 ):
-    await update.message.reply_text("⏳ Group connection porikkha korchi...")
+    await update.message.reply_text("⏳ Group connection পরীক্ষা করছি...")
 
     success = await send_group_notification(
         "🟢 Bot Group Test\n\n"
@@ -195,9 +193,9 @@ async def test_group_command(
     )
 
     if success:
-        await update.message.reply_text("✅ Group test shofol hoyeche. Group-e notification pathano hoyeche.")
+        await update.message.reply_text("✅ Group test সফল হয়েছে। গ্রুপে নোটিফিকেশন পাঠানো হয়েছে।")
     else:
-        await update.message.reply_text("❌ Group test byartho hoyeche. Render Logs dekhun.")
+        await update.message.reply_text("❌ Group test ব্যর্থ হয়েছে। Render Logs দেখুন।")
 
 
 async def status_command(
@@ -252,7 +250,7 @@ async def main():
 
     logger.info("Telegram bot started successfully.")
 
-    # Background task shuru kora jate Mino API theke OTP check kora jay
+    # Background task শুরু করা
     asyncio.create_task(check_mino_otp_loop())
 
     await application.updater.start_polling(drop_pending_updates=True)
