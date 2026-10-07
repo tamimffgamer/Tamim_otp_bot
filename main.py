@@ -169,7 +169,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("🔴 Please send your target number range:")
 
     elif "Live Traffic" in text:
-        # Apnar panel-er moto category ebong range gulo button akare sajano holo
         keyboard = [
             [InlineKeyboardButton("🌐 AUTHMSG (10 Ranges)", callback_data="cat_authmsg")],
             [InlineKeyboardButton("⚡ BOLT (1 Ranges)", callback_data="cat_bolt")],
@@ -197,8 +196,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("💳 **Your Balance:** $0.00000", parse_mode="Markdown", reply_markup=reply_markup)
 
     elif "Support" in text:
-        keyboard = [[InlineKeyboardButton("💬 Saporte jogajog korun", url=f"https://t.me/{SUPPORT_USERNAME})"]
-        ]
+        keyboard = [[InlineKeyboardButton("💬 Support", url=f"https://t.me/{SUPPORT_USERNAME}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("💬 **Support Center**", parse_mode="Markdown", reply_markup=reply_markup)
 
@@ -213,16 +211,15 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     data = query.data
 
     if data == "back_home":
-        await query.message.edit_text("Muler menute fire esechen.")
+        await query.message.edit_text("মূল মেনুতে ফিরে এসেছেন।")
     elif data == "change_num":
-        await query.message.edit_text("🔄 Notun number load kora hocche...")
+        await query.message.edit_text("🔄 নতুন নাম্বার লোড করা হচ্ছে...")
     elif data == "refresh_traffic":
         await query.message.edit_text("🔄 Live traffic synced successfully with panel.")
     elif data == "close_menu":
         await query.message.delete()
     elif data.startswith("cat_"):
         cat_name = data.replace("cat_", "").upper()
-        # Panel er moto specific category select korle tar range er details dekhanor jonno
         await query.message.edit_text(
             f"📂 **Category: {cat_name}**\n\n"
             f"🔹 Active ranges loaded successfully from Mino panel.\n"
@@ -251,7 +248,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
-        await query.answer("Sampurno hoyeche!", show_alert=False)
+        await query.answer("সম্পন্ন হয়েছে!", show_alert=False)
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error("Telegram error occurred:", exc_info=context.error)
