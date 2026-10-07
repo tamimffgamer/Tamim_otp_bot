@@ -119,7 +119,8 @@ async def auto_forward_console_logs(application):
                             hit.get("phone_number") or hit.get("mobile") or hit.get("receiver") or 
                             hit.get("to") or hit.get("range", "")
                         )
-                        SEEN_OTP_IDS.add(f"{n}_{m}")
+                        if m and len(m.strip()) > 0:
+                            SEEN_OTP_IDS.add(f"{n}_{m}")
     except Exception as e:
         print(f"Init Seen Error: {e}")
 
@@ -136,6 +137,11 @@ async def auto_forward_console_logs(application):
                         if not isinstance(hit, dict): continue
 
                         msg = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or ""
+                        
+                        # Jodi message faka thake ba "WAITING" ba kono real OTP message na thake, tobe skip korbe
+                        if not msg or len(msg.strip()) == 0 or "waiting" in msg.lower():
+                            continue
+
                         num = str(
                             hit.get("number") or 
                             hit.get("full_number") or 
@@ -454,7 +460,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             USER_BALANCES[user_id] = 0.0
 
 async def post_init(application):
-    application.create_task(auto_forward_console_logs(application))
+    application.create_task(auto_keyword_listener := auto_forward_console_logs(application))
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
