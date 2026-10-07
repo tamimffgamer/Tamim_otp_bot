@@ -159,7 +159,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["waiting_for_range"] = False
         user_ranges[user_id] = text.strip()
         await update.message.reply_text(
-            f"🔴 Target range successfully set to: `{text.strip()}`\n\nএখন '📞 Get API Number' বাটনে ক্লিক করে প্যানেল থেকে আসল নাম্বার নিন।",
+            f"🔴 Target range successfully set to: `{text.strip()}`\n\nএখন '📞 Get API Number' বাটনে ক্লিক করে প্যানেল থেকে আসল নাম্বার নিতে পারেন।",
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
         )
@@ -168,10 +168,10 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     if "Get API Number" in text:
         target_range = user_ranges.get(user_id, "")
         
-        # রেঞ্জ সেট করা না থাকলে ইউজারকে অ্যালার্ট দেওয়া হবে
+        # রেঞ্জ সেট করা না থাকলে অ্যালার্ট দেওয়া হবে
         if not target_range:
             await update.message.reply_text(
-                "⚠️ **Range Set Kora Nei!**\nপ্রথমে '⚙️ Set Range' থেকে রেঞ্জ সেট করুন, তারপর নাম্বার নিন।",
+                "⚠️ **Range Set Kora Nei!**\nপ্রথমে '⚙️ Set Range' বাটনে ক্লিক করে রেঞ্জ সেট করুন, তারপর নাম্বার নিন।",
                 parse_mode="Markdown",
                 reply_markup=get_main_keyboard()
             )
@@ -179,24 +179,38 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         fetched_number = "Loading from API..."
         try:
-            # Mino SMS API এর মাধ্যমে আসল নাম্বার ফেচ করার রিকোয়েস্ট
+            # Mino SMS API এর মাধ্যমে সফলভাবে আসল নাম্বার ফেচ করার জন্য রিকোয়েস্ট হ্যান্ডলিং
             url = f"{MINO_BASE_URL}/getnumber.php"
             headers = {"mauthapi": MINO_API_KEY}
             payload = {"rid": target_range}
             
             async with aiohttp.ClientSession() as session:
+                # GET এবং POST উভয় মেথড সাপোর্ট করার জন্য ফলব্যাক রাখা হলো যাতে নাম্বার নিতে কোনো সমস্যা না হয়
                 async with session.post(url, headers=headers, json=payload, timeout=10) as resp:
                     if resp.status == 200:
-                        res_data = await resp.json()
-                        fetched_number = res_data.get("number") or res_data.get("phone") or res_data.get("data") or res_data.get("result") or str(res_data)
+                        try:
+                            res_data = await resp.json()
+                            fetched_number = res_data.get("number") or res_data.get("phone") or res_data.get("data") or res_data.get("result") or str(res_data)
+                        except:
+                            fetched_number = await resp.text()
                     else:
-                        fetched_number = f"API Error: Status {resp.status}"
+                        # যদি POST এ সমস্যা হয়, GET মেথড ট্রাই করা হবে
+                        get_url = f"{MINO_BASE_URL}/getnumber.php?api_key={MINO_API_KEY}&rid={target_range}"
+                        async with session.get(get_url, timeout=10) as get_resp:
+                            if get_resp.status == 200:
+                                try:
+                                    res_data = await get_resp.json()
+                                    fetched_number = res_data.get("number") or res_data.get("phone") or res_data.get("data") or res_data.get("result") or str(res_data)
+                                except:
+                                    fetched_number = await get_resp.text()
+                            else:
+                                fetched_number = f"API Error: Status {resp.status}"
         except Exception as e:
             logger.error(f"API fetch error: {e}")
             fetched_number = "API Connection Error"
 
-        # নাম্বার সফলভাবে আসলে ট্র্যাকিং লিস্টে সেভ করা হলো
-        if fetched_number and "Error" not in fetched_number and "Loading" not in fetched_number:
+        # নাম্বার সফলভাবে আসলে তা পার্সোনাল ট্র্যাকিং লিস্টে সেভ করা হলো
+        if fetched_number and "Error" not in fetched_number and "Loading" not in fetched_number and "Connection" not in fetched_number:
             user_active_number[user_id] = str(fetched_number).strip()
 
         keyboard = [
@@ -218,7 +232,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("🔴 দয়া করে আপনার কাঙ্ক্ষিত নাম্বার রেঞ্জটি পাঠান (যেমন: `23762XXX`):", parse_mode="Markdown")
 
     elif "Live Traffic" in text:
-        # লাইভ ট্রাফিক অপশনে সমস্ত রেঞ্জ ধারাবাহিক ও সিরিয়াল অনুযায়ী দেখানোর মেনু
+        # লাইভ ট্রাফিকের জন্য ধারাবাহিক বা সিরিয়াল অনুযায়ী ক্যাটাগরি মেনু
         keyboard = [
             [InlineKeyboardButton("🌐 AUTHMSG (10 Ranges)", callback_data="cat_authmsg")],
             [InlineKeyboardButton("⚡ BOLT (1 Ranges)", callback_data="cat_bolt")],
