@@ -104,7 +104,6 @@ async def fetch_live_traffic_detailed():
 
 async def auto_forward_console_logs(application):
     await asyncio.sleep(2)
-    # Startup e purono logs gulo seen set e add kore dewa hocche jate bot start howar sathe sathe purono message group-e spam na kore
     try:
         headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
         res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=5.0)
@@ -156,10 +155,9 @@ async def auto_forward_console_logs(application):
                             if len(SEEN_OTP_IDS) > 4000:
                                 SEEN_OTP_IDS.pop()
                             
-                            print(f"DEBUG HIT: Number={num} | Msg={msg}")
-                            
                             _, _, flag = get_country_info(num, country)
                             
+                            # ১. প্যানেলের সকল কোড যেভাবে মেইন গ্রুপে ফরোয়ার্ড হয়
                             group_text = (
                                 f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
                                 f"📘 <b>{service} OTP RECEIVE</b>\n\n"
@@ -182,13 +180,14 @@ async def auto_forward_console_logs(application):
                             except Exception as ex:
                                 print(f"Group Forward Error: {ex}")
 
+                            # ২. বট থেকে নেওয়া নাম্বারে ২০ মিনিট (১২০০ সেকেন্ড) এর মধ্যে নতুন কোড আসলে ইনবক্সে পাঠানো
                             clean_log_num = ''.join(filter(str.isdigit, num))
                             
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 req_time = u_info.get("req_time", 0)
                                 
-                                # 30 minutes (1800 seconds) er moddhe asha message consider hobe
-                                if current_loop_time < req_time or (current_loop_time - req_time) > 1800:
+                                # ২০ মিনিট (১২০০ সেকেন্ড) সময়সীমা চেক করা হচ্ছে
+                                if current_loop_time < req_time or (current_loop_time - req_time) > 1200:
                                     continue
 
                                 u_phone = str(u_info.get("phone", ""))
@@ -212,11 +211,15 @@ async def auto_forward_console_logs(application):
                                         current_bal = USER_BALANCES.get(user_id, 0.0)
                                         USER_BALANCES[user_id] = current_bal + 0.00122
                                         
+                                        # প্যানেলের স্টাইলের সাথে মিল রেখে হুবহু ফরম্যাটে ইনবক্সে মেসেজ পাঠানো
                                         personal_text = (
-                                            f"🚨 <b>REAL OTP RECEIVED FOR YOUR NUMBER!</b> 🚨\n\n"
-                                            f"📱 <b>Number:</b> <code>{u_phone}</code>\n"
-                                            f"🔑 <b>OTP Code:</b> <code>{otp_code}</code>\n"
-                                            f"✉ <b>Full SMS:</b> <code>{msg}</code>\n"
+                                            f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
+                                            f"🚨 <b>YOUR NUMBER OTP RECEIVE</b>\n\n"
+                                            f"📘 <b>Service :</b> {service}\n"
+                                            f"🌍 <b>Country :</b> {country} ({flag})\n"
+                                            f"🎯 <b>Number :</b> <code>{u_phone}</code>\n"
+                                            f"🔑 <b>OTP Code :</b> <code>{otp_code}</code>\n\n"
+                                            f"✉ <b>Full Message :</b>\n<code>{msg}</code>\n\n"
                                             f"💰 <b>Earned:</b> +$0.00122"
                                         )
                                         try:
