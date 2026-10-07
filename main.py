@@ -159,7 +159,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["waiting_for_range"] = False
         user_ranges[user_id] = text.strip()
         await update.message.reply_text(
-            f"🔴 Target range successfully set to: `{text.strip()}`\n\nএখন '📞 Get API Number' বাটনে ক্লিক করে প্যানেল থেকে আসল নাম্বার নিতে পারেন।",
+            f"🔴 Target range successfully set to: `{text.strip()}`\n\nএখন নিচের **'📞 Get API Number'** বাটনে ক্লিক করে প্যানেل থেকে সরাসরি আসল নাম্বার নিতে পারেন।",
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
         )
@@ -168,7 +168,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     if "Get API Number" in text:
         target_range = user_ranges.get(user_id, "")
         
-        # রেঞ্জ সেট করা না থাকলে অ্যালার্ট দেওয়া হবে
+        # রেঞ্জ সেট করা না থাকলে ইউজারকে আগে রেঞ্জ সেট করতে বলা হবে
         if not target_range:
             await update.message.reply_text(
                 "⚠️ **Range Set Kora Nei!**\nপ্রথমে '⚙️ Set Range' বাটনে ক্লিক করে রেঞ্জ সেট করুন, তারপর নাম্বার নিন।",
@@ -179,13 +179,13 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         fetched_number = "Loading from API..."
         try:
-            # Mino SMS API এর মাধ্যমে সফলভাবে আসল নাম্বার ফেচ করার জন্য রিকোয়েস্ট হ্যান্ডলিং
+            # Mino SMS API এর মাধ্যমে আসল নাম্বার ফেচ করার সঠিক রিকোয়েস্ট
             url = f"{MINO_BASE_URL}/getnumber.php"
             headers = {"mauthapi": MINO_API_KEY}
             payload = {"rid": target_range}
             
             async with aiohttp.ClientSession() as session:
-                # GET এবং POST উভয় মেথড সাপোর্ট করার জন্য ফলব্যাক রাখা হলো যাতে নাম্বার নিতে কোনো সমস্যা না হয়
+                # POST রিকোয়েস্ট ট্রাই করা হচ্ছে
                 async with session.post(url, headers=headers, json=payload, timeout=10) as resp:
                     if resp.status == 200:
                         try:
@@ -194,7 +194,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                         except:
                             fetched_number = await resp.text()
                     else:
-                        # যদি POST এ সমস্যা হয়, GET মেথড ট্রাই করা হবে
+                        # যদি POST কাজ না করে, GET মেথড ফলব্যাক হিসেবে কাজ করবে
                         get_url = f"{MINO_BASE_URL}/getnumber.php?api_key={MINO_API_KEY}&rid={target_range}"
                         async with session.get(get_url, timeout=10) as get_resp:
                             if get_resp.status == 200:
@@ -291,7 +291,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     if data == "back_home":
         await query.message.edit_text("মূল মেনুতে ফিরে এসেছেন।")
     elif data == "change_num":
-        await query.message.edit_text("🔄 নতুন আসল নাম্বার পাওয়ার জন্য আবার 'Get API Number' বাটনে ক্লিক করুন।")
+        await query.message.edit_text("🔄 নতুন আসল নাম্বার পাওয়ার জন্য আবার মূল মেনুর 'Get API Number' বাটনে ক্লিক করুন।")
     elif data == "refresh_traffic":
         await query.message.edit_text("🔄 Live traffic synced successfully with panel sequentially.")
     elif data == "close_menu":
