@@ -65,18 +65,29 @@ def _sync_fetch_live_traffic():
             if isinstance(res_json, list):
                 hits = res_json
             elif isinstance(res_json, dict):
-                hits = res_json.get("data", []) or res_json.get("hits", [])
+                # Check all possible keys where hits or data might reside
+                hits = res_json.get("data", []) or res_json.get("hits", []) or res_json.get("ranges", [])
                 if isinstance(hits, dict):
-                    hits = hits.get("hits", []) or []
+                    hits = hits.get("hits", []) or hits.get("data", []) or []
 
             if isinstance(hits, list):
                 total_hits = len(hits)
                 for hit in hits:
-                    if not isinstance(hit, dict): continue
-                    r = hit.get("range") or hit.get("rid") or hit.get("number")
-                    sid = hit.get("sid", "FACEBOOK")
-                    if r:
-                        clean_r = str(r).strip()
+                    if isinstance(hit, str):
+                        # If hit is just a string range/number
+                        clean_r = hit.strip()
+                        sid = "FACEBOOK"
+                    elif isinstance(hit, dict):
+                        r = hit.get("range") or hit.get("rid") or hit.get("number") or hit.get("phone")
+                        sid = hit.get("sid") or hit.get("service") or "FACEBOOK"
+                        if not r and "message" in hit:
+                            # Try to extract number/range from message if available
+                            pass
+                        clean_r = str(r).strip() if r else "Unknown"
+                    else:
+                        continue
+
+                    if clean_r and clean_r != "Unknown":
                         key = f"{clean_r}XXX - {str(sid).upper()}"
                         if key in range_counts:
                             range_counts[key]["count"] += 1
@@ -137,7 +148,7 @@ async def auto_forward_console_logs(application):
                     if res.status_code == 200:
                         res_json = res.json()
                         if isinstance(res_json, list): return res_json
-                        data = res_json.get("data", [])
+                        data = res_json.get("data", []) or res_json.get("hits", [])
                         if isinstance(data, list): return data
                         if isinstance(data, dict): return data.get("hits", [])
                 except Exception as ex:
@@ -147,7 +158,7 @@ async def auto_forward_console_logs(application):
             hits = await asyncio.to_thread(fetch_console_hits)
             for hit in hits:
                 if not isinstance(hit, dict): continue
-                r = hit.get("range", "") or hit.get("rid", "")
+                r = hit.get("range", "") or hit.get("rid", "") or hit.get("number", "")
                 sid = hit.get("sid", "FACEBOOK")
                 msg = hit.get("message", "N/A")
                 t_stamp = hit.get("time", "")
@@ -272,7 +283,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         
         if sorted_items:
-            for _, info in sorted_items[:15]:
+            for _, info in sorted_items[:20]:
                 traffic_lines.append(f"• {info['flag']} <code>{info['range']}XXX - {info['sid']} - {info['count']}</code>")
         else:
             traffic_lines.append("⚠️ No active ranges found right now.")
