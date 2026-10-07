@@ -1,6 +1,7 @@
 import os
 import asyncio
 import requests
+import json
 import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, CopyTextButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -14,7 +15,6 @@ OTP_GROUP_CHAT_ID = -1004436883235
 
 USER_STATES = {}
 USER_RANGES = {}
-SEEN_OTP_IDS = set()
 
 def get_country_info(phone_number):
     clean_num = str(phone_number).replace("+", "").strip()
@@ -62,12 +62,22 @@ def _sync_fetch_live_traffic():
         res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=5)
         if res.status_code == 200:
             res_json = res.json()
-            hits = res_json.get("data", {}).get("hits", []) or res_json.get("data", []) or res_json.get("hits", [])
+            # প্রিন্ট করে টার্মিনালে দেখা যাবে প্যানেল থেকে আসলে কী ডেটা আসছে
+            print("Console Response:", res_json)
+            
+            hits = []
+            if isinstance(res_json, list):
+                hits = res_json
+            elif isinstance(res_json, dict):
+                hits = res_json.get("data", []) or res_json.get("hits", []) or res_json.get("messages", [])
+                if isinstance(hits, dict):
+                    hits = hits.get("hits", []) or []
+
             if isinstance(hits, list):
                 total_hits = len(hits)
                 for hit in hits:
                     if not isinstance(hit, dict): continue
-                    r = hit.get("range") or hit.get("rid")
+                    r = hit.get("range") or hit.get("rid") or hit.get("number")
                     sid = hit.get("sid", "FACEBOOK")
                     if r:
                         clean_r = str(r).strip()
@@ -98,7 +108,6 @@ def _sync_check_minosms_otp(target_phone):
                     if not isinstance(otp_item, dict): continue
                     num_raw = str(otp_item.get("number", ""))
                     msg = str(otp_item.get("message", ""))
-                    
                     clean_num = ''.join(filter(str.isdigit, num_raw))
                     
                     if short_target in clean_num or (clean_target and clean_target in clean_num):
@@ -125,7 +134,10 @@ async def auto_forward_console_logs(application):
                     res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=5)
                     if res.status_code == 200:
                         res_json = res.json()
-                        return res_json.get("data", {}).get("hits", []) or []
+                        if isinstance(res_json, list): return res_json
+                        data = res_json.get("data", [])
+                        if isinstance(data, list): return data
+                        if isinstance(data, dict): return data.get("hits", [])
                 except Exception as ex:
                     print(f"Auto Forward Fetch Error: {ex}")
                 return []
@@ -133,8 +145,7 @@ async def auto_forward_console_logs(application):
             hits = await asyncio.to_thread(fetch_console_hits)
             for hit in hits:
                 if not isinstance(hit, dict): continue
-                
-                r = hit.get("range", "")
+                r = hit.get("range", "") or hit.get("rid", "")
                 sid = hit.get("sid", "FACEBOOK")
                 msg = hit.get("message", "N/A")
                 t_stamp = hit.get("time", "")
@@ -142,48 +153,31 @@ async def auto_forward_console_logs(application):
                 unique_id = f"{r}_{t_stamp}_{msg}"
                 if unique_id in seen_local_hits:
                     continue
-                
                 seen_local_hits.add(unique_id)
                 if len(seen_local_hits) > 500:
                     seen_local_hits.clear()
 
                 clean_num = str(r)
-                if len(clean_num) > 6:
-                    masked_num = clean_num[:6] + "X" * (len(clean_num) - 6)
-                else:
-                    masked_num = clean_num
-
+                masked_num = clean_num[:6] + "X" * (len(clean_num) - 6) if len(clean_num) > 6 else clean_num
                 _, country_code, flag = get_country_info(str(r))
                 
                 log_text = (
-                    f"<b>MINOSMS PANEL LOGS</b>                     <b>Admin</b>\n"
-                    f"OTP                     Admin\n"
+                    f"<b>MINOSMS PANEL LOGS</b>\n"
                     f"📘 <b>{sid} OTP RECEIVE</b>\n"
                     f"━━━━━━━━━━━━━━━━━━━\n"
                     f"{flag} <b>Country :</b> {country_code}\n"
                     f"🎯 <b>Range :</b> <code>{masked_num}</code>\n"
-                    f"🗣 <b>Language :</b> English\n"
                     f"━━━━━━━━━━━━━━━━━━━\n"
                     f"✉ <b>Message :</b>\n"
                     f"<code>{msg}</code>"
                 )
-                
-                markup = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("NUMBER BOT ↗", url=OTP_GROUP_URL)]
-                ])
-                
+                markup = InlineKeyboardMarkup([[InlineKeyboardButton("NUMBER BOT ↗", url=OTP_GROUP_URL)]])
                 try:
-                    await application.bot.send_message(
-                        chat_id=OTP_GROUP_CHAT_ID,
-                        text=log_text,
-                        reply_markup=markup,
-                        parse_mode="HTML"
-                    )
+                    await application.bot.send_message(chat_id=OTP_GROUP_CHAT_ID, text=log_text, reply_markup=markup, parse_mode="HTML")
                 except Exception as send_err:
                     print(f"Telegram Send Error: {send_err}")
         except Exception as e:
             print(f"Auto Forward Error: {e}")
-        
         await asyncio.sleep(3)
 
 def create_number_markup(numbers_list):
@@ -191,26 +185,18 @@ def create_number_markup(numbers_list):
     for num in numbers_list:
         _, _, flag = get_country_info(num)
         keyboard.append([InlineKeyboardButton(text=f"{flag} {num}", copy_text=CopyTextButton(text=num))])
-    
-    keyboard.append([
-        InlineKeyboardButton("🔔 OTP GROUP", url=OTP_GROUP_URL),
-        InlineKeyboardButton("🔄 Change", callback_data="change_number")
-    ])
+    keyboard.append([InlineKeyboardButton("🔔 OTP GROUP", url=OTP_GROUP_URL), InlineKeyboardButton("🔄 Change", callback_data="change_number")])
     keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_home")])
     return InlineKeyboardMarkup(keyboard)
 
 async def poll_for_otp(chat_id, phone, context):
-    for _ in range(300): 
-        await asyncio.sleep(1) 
+    for _ in range(300):
+        await asyncio.sleep(1)
         try:
             status = await check_minosms_otp(phone)
             if status:
                 otp_message = f"🚨 <b>NEW OTP RECEIVED!</b> 🚨\n\n📱 <b>Number:</b> <code>{phone}</code>\n🔑 <b>OTP Code:</b> <code>{status}</code>"
-                await context.bot.send_message(
-                    chat_id=chat_id, 
-                    text=otp_message, 
-                    parse_mode="HTML"
-                )
+                await context.bot.send_message(chat_id=chat_id, text=otp_message, parse_mode="HTML")
                 return
         except Exception as e:
             print(f"Polling Send Error: {e}")
@@ -251,10 +237,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if p and p not in numbers:
                 numbers.append(p)
 
-        try:
-            await wait_msg.delete()
-        except Exception:
-            pass
+        try: await wait_msg.delete()
+        except Exception: pass
 
         if not numbers:
             await update.message.reply_text(f"❌ <b>No Real Number Available!</b>\n\nPanel has no stock for range <code>{user_range}</code>.", parse_mode="HTML")
@@ -262,7 +246,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         _, _, flag = get_country_info(numbers[0])
         header_text = f"✅ <b>Number:</b> {flag} {numbers[0]}"
-        
         reply_markup = create_number_markup(numbers)
         await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
         
@@ -296,16 +279,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif "OTP Group" in text:
         USER_STATES[user_id] = None
-        group_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📣 Join OTP Group ↗", url=OTP_GROUP_URL)]
-        ])
+        group_markup = InlineKeyboardMarkup([[InlineKeyboardButton("📣 Join OTP Group ↗", url=OTP_GROUP_URL)]])
         await update.message.reply_text("📣 Click the button below to join our official OTP Group:", reply_markup=group_markup)
 
     elif "Support" in text:
         USER_STATES[user_id] = None
-        support_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💬 Contact Support ↗", url=f"https://t.me/{SUPPORT_USERNAME}")]
-        ])
+        support_markup = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Contact Support ↗", url=f"https://t.me/{SUPPORT_USERNAME}")]])
         await update.message.reply_text(f"🛠 For any help or support, contact admin directly: @{SUPPORT_USERNAME}", reply_markup=support_markup)
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -316,19 +295,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = query.from_user.id
         user_range = USER_RANGES.get(user_id, "23762")
         numbers = []
-
         for _ in range(2):
             p, oid = await get_minosms_real_number(target_range=user_range)
             if p and p not in numbers:
                 numbers.append(p)
-
         if not numbers: return
 
         _, _, flag = get_country_info(numbers[0])
         header_text = f"✅ <b>Number:</b> {flag} {numbers[0]}"
         reply_markup = create_number_markup(numbers)
-        try:
-            await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
+        try: await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
         except Exception: pass
 
         for p in numbers:
