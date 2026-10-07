@@ -102,33 +102,6 @@ def _sync_fetch_live_traffic_detailed():
 async def fetch_live_traffic_detailed():
     return await asyncio.to_thread(_sync_fetch_live_traffic_detailed)
 
-def get_existing_old_otps(phone):
-    old_otps = set()
-    try:
-        headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
-        res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
-        if res.status_code == 200:
-            hits = res.json().get("data", [])
-            if isinstance(hits, list):
-                clean_target = ''.join(filter(str.isdigit, str(phone)))
-                for hit in hits:
-                    if not isinstance(hit, dict): continue
-                    num = str(
-                        hit.get("number") or hit.get("full_number") or hit.get("phone") or 
-                        hit.get("phone_number") or hit.get("mobile") or hit.get("receiver") or 
-                        hit.get("to") or hit.get("range", "")
-                    )
-                    clean_hit_num = ''.join(filter(str.isdigit, num))
-                    if clean_target and clean_hit_num and (clean_target == clean_hit_num or clean_hit_num.endswith(clean_target) or clean_target.endswith(clean_hit_num)):
-                        msg = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or ""
-                        match_otp = re.search(r'\b\d{4,8}\b', msg)
-                        if match_otp:
-                            old_otps.add(match_otp.group(0))
-                            SEEN_OTP_IDS.add(f"{num}_{msg}")
-    except Exception as e:
-        print(f"Old OTP Fetch Error: {e}")
-    return old_otps
-
 async def auto_forward_console_logs(application):
     await asyncio.sleep(2)
     try:
@@ -220,7 +193,8 @@ async def auto_forward_console_logs(application):
                             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                                 req_time = u_info.get("req_time", 0)
                                 
-                                if current_loop_time < req_time or (current_loop_time - req_time) > 3600:
+                                # STRICT 20 MINUTES WINDOW CHECK (1200 seconds)
+                                if current_loop_time < req_time or (current_loop_time - req_time) > 1200:
                                     continue
 
                                 u_phone = str(u_info.get("phone", ""))
@@ -331,17 +305,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ No stock available for range <code>{user_range}</code>.", parse_mode="HTML")
             return
 
-        existing_old = await asyncio.to_thread(get_existing_old_otps, phone)
-
+        # Record exact timestamp when number is fetched. Only messages arriving AFTER this timestamp within 20 mins will be forwarded.
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": update.effective_chat.id,
             "req_time": time.time(),
-            "sent_otps": existing_old
+            "sent_otps": set()
         }
 
         country_name, _, flag = get_country_info(phone)
-        header_text = f"✅ <b>Number:</b> {flag} {country_name}\n\nEkhon ei number-ti te OTP pathale sathe sathe apnar inbox-e real code chole asbe!"
+        header_text = f"✅ <b>Number:</b> {flag} {country_name}\n\nEkhon ei number-ti te OTP pathale shudhu matro agami 20 minute-er moddhe asha real code-i apnar inbox-e ashbe!"
         reply_markup = create_single_number_markup(phone)
         await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
 
@@ -400,17 +373,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer(f"❌ No stock available for range {user_range}.", show_alert=True)
             return
 
-        existing_old = await asyncio.to_thread(get_existing_old_otps, phone)
-
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": query.message.chat_id,
             "req_time": time.time(),
-            "sent_otps": existing_old
+            "sent_otps": set()
         }
 
         country_name, _, flag = get_country_info(phone)
-        header_text = f"✅ <b>New Number:</b> {flag} {country_name}"
+        header_text = f"✅ <b>New Number:</b> {flag} {country_name}\n\nAgami 20 minute-er moddhe asha notun real code-i shudhu ekhane ashbe!"
         reply_markup = create_single_number_markup(phone)
         try:
             await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
@@ -493,7 +464,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             USER_BALANCES[user_id] = 0.0
 
 async def post_init(application):
-    application.create_task(auto_forward_console_logs(application))
+    application.create_task(auto_format_console_logs_wrapper(application))
+
+async def auto_format_console_logs_wrapper(application):
+    await auto_forward_console_logs(application)
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
