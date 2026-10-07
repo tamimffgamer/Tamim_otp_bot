@@ -299,7 +299,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
-            "chat_id": update.effective_chat.ID,
+            "chat_id": update.effective_chat.id,
             "req_time": time.time(),
             "sent_otps": set()
         }
