@@ -2,7 +2,7 @@ import os
 import asyncio
 import logging
 from threading import Thread
-from flask import Flask
+from flask import Flask, request, jsonify
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -22,6 +22,12 @@ OTP_GROUP_CHAT_ID = -1004436883235
 
 # আপনার Telegram username
 SUPPORT_USERNAME = "tmtamimmia"
+
+# আপনার Render Webhook URL
+WEBHOOK_URL = "https://tamim-otp-bot.onrender.com/webhook/otp"
+
+# Global application instance
+application = None
 
 # =========================================================
 # LOGGING
@@ -51,7 +57,34 @@ if not MINO_API_KEY:
 
 
 # =========================================================
-# RENDER HEALTH SERVER
+# TELEGRAM GROUP NOTIFICATION HELPER
+# =========================================================
+
+async def send_group_notification(text: str):
+    """
+    Telegram group-এ notification পাঠানোর function।
+    """
+    try:
+        if not application or not application.bot:
+            logger.error("Bot instance not initialized yet.")
+            return False
+
+        await application.bot.send_message(
+            chat_id=OTP_GROUP_CHAT_ID,
+            text=text,
+            parse_mode="Markdown"
+        )
+
+        logger.info("Group notification sent successfully.")
+        return True
+
+    except Exception as e:
+        logger.exception("Group notification failed: %s", e)
+        return False
+
+
+# =========================================================
+# RENDER HEALTH & WEBHOOK SERVER
 # =========================================================
 
 flask_app = Flask(__name__)
@@ -59,12 +92,54 @@ flask_app = Flask(__name__)
 
 @flask_app.route("/")
 def home():
-    return "Bot is running successfully."
+    return f"Bot is running successfully. Webhook is active at: {WEBHOOK_URL}"
 
 
 @flask_app.route("/health")
 def health():
     return "OK"
+
+
+# প্যানেল থেকে OTP রিসিভ করার জন্য Webhook Endpoint
+@flask_app.route("/webhook/otp", methods=["POST"])
+def receive_otp():
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"status": "error", "message": "No JSON data provided"}), 400
+
+        # প্যানেল থেকে পাঠানো ডেটা
+        service_name = data.get("service", "OTP Service")
+        country = data.get("country", "N/A")
+        range_val = data.get("range", "N/A")
+        message = data.get("message", "No message content")
+
+        # গ্রুপে পাঠানোর জন্য সুন্দর ফরম্যাট তৈরি
+        text = (
+            f"📦 **SMM NUMBER PANEL**\n"
+            f"Admin\n"
+            f"OTP\t\t\tAdmin\n"
+            f"📘 **{service_name}**\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"🇹🇯 Country : {country}\n"
+            f"🎯 Range : {range_val}\n"
+            f"🗣️ Language : English\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"✉️ Message :\n{message}"
+        )
+
+        # Async function-টি Flask thread থেকে নিরাপদে চালানোর জন্য
+        future = asyncio.run_coroutine_threadsafe(
+            send_group_notification(text),
+            application.loop
+        )
+        future.result(timeout=10)
+
+        return jsonify({"status": "success", "message": "OTP sent to group"}), 200
+
+    except Exception as e:
+        logger.exception("Webhook error: %s", e)
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 def run_web_server():
@@ -78,43 +153,14 @@ def run_web_server():
 
 
 # =========================================================
-# TELEGRAM GROUP TEST
-# =========================================================
-
-async def send_group_notification(text: str):
-    """
-    Telegram group-এ সাধারণ notification পাঠানোর function।
-    OTP/verification code পাঠানোর জন্য নয়।
-    """
-
-    try:
-        bot = application.bot
-
-        await bot.send_message(
-            chat_id=OTP_GROUP_CHAT_ID,
-            text=text,
-        )
-
-        logger.info("Group notification sent successfully.")
-        return True
-
-    except Exception as e:
-        logger.exception("Group notification failed: %s", e)
-        return False
-
-
-# =========================================================
-# /START
+# TELEGRAM COMMANDS (/START, /ID, /TESTGROUP, /STATUS)
 # =========================================================
 
 async def start_command(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
-
     user = update.effective_user
-    chat = update.effective_chat
-
     name = user.first_name if user else "User"
 
     text = (
@@ -129,15 +175,10 @@ async def start_command(
     await update.message.reply_text(text)
 
 
-# =========================================================
-# /ID
-# =========================================================
-
 async def id_command(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
-
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
@@ -147,51 +188,30 @@ async def id_command(
         f"Chat ID: `{chat_id}`"
     )
 
-    await update.message.reply_text(
-        text,
-        parse_mode="Markdown",
-    )
+    await update.message.reply_text(text, parse_mode="Markdown")
 
-
-# =========================================================
-# /TESTGROUP
-# =========================================================
 
 async def test_group_command(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
-
-    await update.message.reply_text(
-        "⏳ Group connection পরীক্ষা করছি..."
-    )
+    await update.message.reply_text("⏳ Group connection পরীক্ষা করছি...")
 
     success = await send_group_notification(
-        "🟢 Bot Group Test\n\n"
+        "🟢 **Bot Group Test**\n\n"
         "Telegram group connection successfully working."
     )
 
     if success:
-        await update.message.reply_text(
-            "✅ Group test সফল হয়েছে।\n\n"
-            "গ্রুপে test notification পাঠানো হয়েছে।"
-        )
+        await update.message.reply_text("✅ Group test সফল হয়েছে। গ্রুপে নোটিফিকেশন পাঠানো হয়েছে।")
     else:
-        await update.message.reply_text(
-            "❌ Group test ব্যর্থ হয়েছে।\n\n"
-            "Render Logs দেখুন।"
-        )
+        await update.message.reply_text("❌ Group test ব্যর্থ হয়েছে। Render Logs দেখুন।")
 
-
-# =========================================================
-# /STATUS
-# =========================================================
 
 async def status_command(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
-
     token_status = "✅ Set" if BOT_TOKEN else "❌ Missing"
     api_status = "✅ Set" if MINO_API_KEY else "❌ Missing"
 
@@ -200,25 +220,18 @@ async def status_command(
         f"🤖 BOT_TOKEN: {token_status}\n"
         f"🔑 MINO_API_KEY: {api_status}\n"
         f"👥 Group ID: {OTP_GROUP_CHAT_ID}\n"
-        "🌐 Render server: ✅ Running"
+        f"🌐 Webhook URL: `{WEBHOOK_URL}`\n"
+        "🌐 Render server & Webhook: ✅ Running"
     )
 
-    await update.message.reply_text(text)
+    await update.message.reply_text(text, parse_mode="Markdown")
 
-
-# =========================================================
-# ERROR HANDLER
-# =========================================================
 
 async def error_handler(
     update: object,
     context: ContextTypes.DEFAULT_TYPE,
 ):
-
-    logger.exception(
-        "Telegram error:",
-        exc_info=context.error,
-    )
+    logger.exception("Telegram error:", exc_info=context.error)
 
 
 # =========================================================
@@ -226,7 +239,6 @@ async def error_handler(
 # =========================================================
 
 async def main():
-
     global application
 
     application = (
@@ -236,35 +248,20 @@ async def main():
     )
 
     # Commands
-    application.add_handler(
-        CommandHandler("start", start_command)
-    )
-
-    application.add_handler(
-        CommandHandler("id", id_command)
-    )
-
-    application.add_handler(
-        CommandHandler("testgroup", test_group_command)
-    )
-
-    application.add_handler(
-        CommandHandler("status", status_command)
-    )
-
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("id", id_command))
+    application.add_handler(CommandHandler("testgroup", test_group_command))
+    application.add_handler(CommandHandler("status", status_command))
     application.add_error_handler(error_handler)
 
     logger.info("Starting Telegram bot...")
 
-    # Start polling
     await application.initialize()
     await application.start()
 
     logger.info("Telegram bot started successfully.")
 
-    await application.updater.start_polling(
-        drop_pending_updates=True
-    )
+    await application.updater.start_polling(drop_pending_updates=True)
 
     # Keep running
     while True:
@@ -276,26 +273,18 @@ async def main():
 # =========================================================
 
 if __name__ == "__main__":
-
-    # Render web server
+    # Render web server thread
     web_thread = Thread(
         target=run_web_server,
         daemon=True,
     )
-
     web_thread.start()
-
-    logger.info("Render health server started.")
+    logger.info("Render health & webhook server started.")
 
     try:
         asyncio.run(main())
-
     except KeyboardInterrupt:
         logger.info("Bot stopped.")
-
     except Exception as e:
-        logger.exception(
-            "Fatal error: %s",
-            e,
-        )
+        logger.exception("Fatal error: %s", e)
         raise
