@@ -2,6 +2,7 @@ import os
 import asyncio
 import requests
 import re
+from collections import Counter
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, CopyTextButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
@@ -31,50 +32,6 @@ def get_country_info(phone_number):
     elif clean_num.startswith("1809") or clean_num.startswith("1829"): return "Dominican Republic", "DO", "🇩🇴"
     elif clean_num.startswith("49"): return "Germany", "DE", "🇩🇪"
     else: return "Togo", "TG", "🇹🇬"
-
-def _sync_get_panel_ranges():
-    headers = {"mauthapi": PANEL_API_KEY, "Accept": "application/json"}
-    endpoints = [
-        f"{BASE_API_URL}/console.php?api_key={PANEL_API_KEY}",
-        f"{BASE_API_URL}/console",
-        f"{BASE_API_URL}/ranges.php",
-        f"{BASE_API_URL}/api/ranges"
-    ]
-    
-    services = {}
-    for url in endpoints:
-        try:
-            res = requests.get(url, headers=headers, timeout=3)
-            if res.status_code == 200:
-                res_json = res.json()
-                items = []
-                if isinstance(res_json, list):
-                    items = res_json
-                elif isinstance(res_json, dict):
-                    items = res_json.get("data", {}).get("hits", []) or res_json.get("data", []) or res_json.get("ranges", []) or []
-                
-                for item in items:
-                    if not isinstance(item, dict): continue
-                    sid = str(item.get("sid") or item.get("service") or item.get("name") or "FACEBOOK").upper()
-                    r = str(item.get("range") or item.get("rid") or item.get("number") or "").strip()
-                    if r:
-                        if sid not in services: services[sid] = set()
-                        services[sid].add(r)
-        except Exception:
-            continue
-            
-    # Fallback default active ranges if API is empty
-    if not services:
-        services = {
-            "FACEBOOK": {"23762", "22462", "26132", "25574", "37493"},
-            "TELEGRAM": {"23762", "22898", "99291", "18095"},
-            "WHATSAPP": {"49151", "23762", "25575"}
-        }
-
-    return {k: list(v) for k, v in services.items()}
-
-async def get_panel_ranges():
-    return await asyncio.to_thread(_sync_get_panel_ranges)
 
 def _sync_get_panel_real_number(target_range):
     headers = {"mauthapi": PANEL_API_KEY, "Accept": "application/json", "Content-Type": "application/json"}
@@ -209,7 +166,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     USER_STATES[user_id] = None
     reply_keyboard = [
-        ["📞 Get API Number", "📂 Panel Ranges"],
+        ["📞 Get API Number"],
         ["⚙ Set Range", "🟢 Live Traffic"],
         ["💳 Balance", "💬 Support"],
         ["📣 OTP Group"]
@@ -273,38 +230,52 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for p, oid in orders:
             asyncio.create_task(poll_for_otp(update.effective_chat.id, user_id, oid, p, context))
 
-    elif "Panel Ranges" in text:
-        USER_STATES[user_id] = None
-        wait_msg = await update.message.reply_text("⏳ Fetching all active ranges from panel...")
-        services = await get_panel_ranges()
-        try: await wait_msg.delete()
-        except Exception: pass
-
-        if not services:
-            await update.message.reply_text("⚠️ No active ranges found in panel right now.")
-            return
-
-        keyboard = []
-        for sid, ranges in services.items():
-            keyboard.append([InlineKeyboardButton(f"📂 {sid} ({len(ranges)} Ranges)", callback_data=f"service_{sid}")])
-        
-        await update.message.reply_text("📂 <b>All Available Panel Services & Ranges:</b>\nClick any service below to view and select its ranges:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-
     elif "Set Range" in text:
         USER_STATES[user_id] = "WAITING_FOR_RANGE"
         await update.message.reply_text("🔴 Please send your target number range (e.g. 23762):")
 
     elif "Live Traffic" in text:
         USER_STATES[user_id] = None
+        wait_msg = await update.message.reply_text("⏳ Fetching live traffic and analyzing range hits...")
         headers = {"mauthapi": PANEL_API_KEY, "Accept": "application/json"}
         try:
-            res = requests.get(f"{BASE_API_URL}/console.php?api_key={PANEL_API_KEY}", headers=headers, timeout=2)
-            if res.status_code != 200: res = requests.get(f"{BASE_API_URL}/console", headers=headers, timeout=2)
-            hits = res.json() if res.status_code == 200 else []
-            if isinstance(hits, dict): hits = hits.get("data", {}).get("hits", []) or hits.get("data", []) or []
+            res = requests.get(f"{BASE_API_URL}/console.php?api_key={PANEL_API_KEY}", headers=headers, timeout=3)
+            if res.status_code != 200: 
+                res = requests.get(f"{BASE_API_URL}/console", headers=headers, timeout=3)
+            
+            hits = []
+            if res.status_code == 200:
+                res_json = res.json()
+                if isinstance(res_json, list): hits = res_json
+                elif isinstance(res_json, dict):
+                    hits = res_json.get("data", {}).get("hits", []) or res_json.get("data", []) or []
+
+            try: await wait_msg.delete()
+            except Exception: pass
+
+            range_counter = Counter()
+            for hit in hits:
+                if not isinstance(hit, dict): continue
+                r = str(hit.get("range", "") or hit.get("rid", "") or hit.get("number", "")).strip()
+                if r:
+                    clean_r = r[:6] if len(r) >= 6 else r
+                    range_counter[clean_r] += 1
+
             total_hits = len(hits) if isinstance(hits, list) else 0
-            await update.message.reply_text(f"📊 <b>Live Traffic Summary</b>\n\n📋 <b>Total OTP Received:</b> {total_hits}", parse_mode="HTML")
-        except Exception:
+            sorted_ranges = range_counter.most_common()
+
+            traffic_text = f"📊 <b>Live Traffic Summary</b>\n\n📋 <b>Total OTP Received:</b> {total_hits}\n\n🔥 <b>Ranges Sorted by Highest Hits:</b>\n"
+            if sorted_ranges:
+                for idx, (rng, count) in enumerate(sorted_ranges[:15], 1):
+                    _, _, flag = get_country_info(rng)
+                    traffic_text += f"{idx}. {flag} Range: <code>{rng}</code> — <b>{count} hits</b>\n"
+            else:
+                traffic_text += "<i>No hit data available right now.</i>"
+
+            await update.message.reply_text(traffic_text, parse_mode="HTML")
+        except Exception as e:
+            try: await wait_msg.delete()
+            except Exception: pass
             await update.message.reply_text("⚠️ Could not fetch live traffic right now.")
 
     elif "Balance" in text:
@@ -330,37 +301,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     data = query.data
 
-    if data.startswith("service_"):
-        sid = data.replace("service_", "")
-        services = await get_panel_ranges()
-        ranges = services.get(sid, [])
-        
-        keyboard = []
-        for r in ranges:
-            country_name, _, flag = get_country_info(r)
-            keyboard.append([InlineKeyboardButton(f"{flag} {country_name} | {r}XXX", callback_data=f"selrange_{r}")])
-        keyboard.append([InlineKeyboardButton("🔙 Back to Services", callback_data="back_services")])
-        
-        try:
-            await query.edit_message_text(f"📌 <b>Service: {sid}</b>\nSelect a range to set as target:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-        except Exception: pass
-
-    elif data.startswith("selrange_"):
-        selected_r = data.replace("selrange_", "")
-        USER_RANGES[user_id] = selected_r
-        try:
-            await query.edit_message_text(f"✅ Target range successfully set to: <code>{selected_r}</code>\n\nNow click 'Get API Number' from menu to grab numbers!", parse_mode="HTML")
-        except Exception: pass
-
-    elif data == "back_services":
-        services = await get_panel_ranges()
-        keyboard = [[InlineKeyboardButton(f"📂 {sid} ({len(ranges)} Ranges)", callback_data=f"service_{sid}")] for sid, ranges in services.items()]
-        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_home")])
-        try:
-            await query.edit_message_text("📂 <b>Available Panel Services & Ranges:</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-        except Exception: pass
-
-    elif data == "change_number":
+    if data == "change_number":
         user_range = USER_RANGES.get(user_id, "23762")
         results = await asyncio.gather(get_panel_real_number(target_range=user_range), get_panel_real_number(target_range=user_range))
         numbers, orders = [], []
