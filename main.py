@@ -53,20 +53,25 @@ async def get_minosms_real_number(target_range="23762"):
     return await asyncio.to_thread(_sync_get_minosms_real_number, target_range)
 
 def _sync_fetch_live_traffic():
+    # Minosms console.php API call with query parameter or proper headers
     headers = {"mauthapi": MINOSMS_API_KEY, "Accept": "application/json"}
     range_counts = {}
     total_hits = 0
     top_range_text = "N/A"
+    
     try:
-        res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=5)
+        # Trying both query param and headers for maximum compatibility
+        res = requests.get(f"{BASE_API_URL}/console.php?api_key={MINOSMS_API_KEY}", headers=headers, timeout=5)
+        if res.status_code != 200:
+            res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=5)
+            
         if res.status_code == 200:
             res_json = res.json()
             hits = []
             if isinstance(res_json, list):
                 hits = res_json
             elif isinstance(res_json, dict):
-                # Check all possible keys where hits or data might reside
-                hits = res_json.get("data", []) or res_json.get("hits", []) or res_json.get("ranges", [])
+                hits = res_json.get("data", []) or res_json.get("hits", []) or res_json.get("ranges", []) or res_json.get("console", [])
                 if isinstance(hits, dict):
                     hits = hits.get("hits", []) or hits.get("data", []) or []
 
@@ -74,20 +79,17 @@ def _sync_fetch_live_traffic():
                 total_hits = len(hits)
                 for hit in hits:
                     if isinstance(hit, str):
-                        # If hit is just a string range/number
                         clean_r = hit.strip()
                         sid = "FACEBOOK"
                     elif isinstance(hit, dict):
-                        r = hit.get("range") or hit.get("rid") or hit.get("number") or hit.get("phone")
-                        sid = hit.get("sid") or hit.get("service") or "FACEBOOK"
-                        if not r and "message" in hit:
-                            # Try to extract number/range from message if available
-                            pass
-                        clean_r = str(r).strip() if r else "Unknown"
+                        r = hit.get("range") or hit.get("rid") or hit.get("number") or hit.get("phone") or hit.get("prefix")
+                        sid = hit.get("sid") or hit.get("service") or hit.get("app") or "FACEBOOK"
+                        clean_r = str(r).strip() if r else ""
                     else:
                         continue
 
-                    if clean_r and clean_r != "Unknown":
+                    if clean_r:
+                        clean_r = clean_r.replace("XXX", "").replace("X", "").strip()
                         key = f"{clean_r}XXX - {str(sid).upper()}"
                         if key in range_counts:
                             range_counts[key]["count"] += 1
@@ -144,7 +146,7 @@ async def auto_forward_console_logs(application):
             headers = {"mauthapi": MINOSMS_API_KEY, "Accept": "application/json"}
             def fetch_console_hits():
                 try:
-                    res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=5)
+                    res = requests.get(f"{BASE_API_URL}/console.php?api_key={MINOSMS_API_KEY}", headers=headers, timeout=5)
                     if res.status_code == 200:
                         res_json = res.json()
                         if isinstance(res_json, list): return res_json
@@ -189,7 +191,7 @@ async def auto_forward_console_logs(application):
                     print(f"Telegram Send Error: {send_err}")
         except Exception as e:
             print(f"Auto Forward Error: {e}")
-        await asyncio.sleep(3)
+        await asyncio.sleep(5)
 
 def create_number_markup(numbers_list):
     keyboard = []
@@ -356,7 +358,7 @@ async def post_init(application):
     asyncio.create_task(auto_forward_console_logs(application))
 
 if __name__ == '__main__':
-    app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).drop_pending_updates(True).build()
     app.add_handler(CommandHandler('start', start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(handle_callback))
@@ -365,7 +367,10 @@ if __name__ == '__main__':
     import threading
 
     class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
-        do_GET = lambda self, *a: (self.send_response(200), self.end_headers(), self.wfile.write(b"Bot is running!"))
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Bot is running!")
 
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
