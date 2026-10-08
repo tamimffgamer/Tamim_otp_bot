@@ -64,6 +64,21 @@ def _sync_get_mino_real_number(target_range):
 async def get_mino_real_number(target_range="23762XXX"):
     return await asyncio.to_thread(_sync_get_mino_real_number, target_range)
 
+def _sync_check_number_sms(phone_number):
+    headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
+    clean_num = str(phone_number).strip()
+    try:
+        res = requests.get(f"{BASE_API_URL}/check.php?api_key={MINO_API_KEY}&number={clean_num}", headers=headers, timeout=4.0)
+        if res.status_code == 200:
+            res_json = res.json()
+            return res_json
+    except Exception as e:
+        print(f"Check SMS API Error: {e}")
+    return None
+
+async def check_number_sms(phone_number):
+    return await asyncio.to_thread(_sync_check_number_sms, phone_number)
+
 def _sync_fetch_live_traffic_detailed():
     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
     service_data = {}
@@ -103,27 +118,67 @@ async def fetch_live_traffic_detailed():
     return await asyncio.to_thread(_sync_fetch_live_traffic_detailed)
 
 async def auto_forward_console_logs(application):
-    try:
-        headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
-        res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=5.0)
-        if res.status_code == 200:
-            res_json = res.json()
-            hits = res_json.get("data", [])
-            if isinstance(hits, list):
-                for hit in hits:
-                    if isinstance(hit, dict):
-                        m = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or hit.get("msg") or ""
-                        n = str(
-                            hit.get("number") or hit.get("full_number") or hit.get("phone") or 
-                            hit.get("phone_number") or hit.get("mobile") or hit.get("receiver") or 
-                            hit.get("to") or hit.get("range", "")
-                        ).strip()
-                        SEEN_OTP_IDS.add(f"{n}_{m}")
-    except Exception as e:
-        print(f"Init Seen Error: {e}")
-
     while True:
         try:
+            for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
+                u_phone = str(u_info.get("phone", "")).strip()
+                if not u_phone: continue
+
+                check_res = await check_number_sms(u_phone)
+                if check_res and isinstance(check_res, dict):
+                    messages = check_res.get("data") or check_res.get("messages") or check_res.get("sms") or []
+                    if isinstance(messages, dict):
+                        messages = [messages]
+                    elif not isinstance(messages, list):
+                        messages = []
+
+                    for msg_item in messages:
+                        if not isinstance(msg_item, dict): continue
+                        msg = msg_item.get("message") or msg_item.get("text") or msg_item.get("sms") or msg_item.get("content") or msg_item.get("msg") or ""
+                        service = msg_item.get("service", "SMS")
+                        country = msg_item.get("country", "Cameroon")
+
+                        if not msg: continue
+
+                        log_id = f"{u_phone}_{msg}"
+                        if log_id in SEEN_OTP_IDS:
+                            continue
+                        
+                        SEEN_OTP_IDS.add(log_id)
+                        if len(SEEN_OTP_IDS) > 5000:
+                            SEEN_OTP_IDS.pop()
+
+                        _, _, flag = get_country_info(u_phone, country)
+
+                        match_otp = re.search(r'\b\d{4,8}\b', msg)
+                        otp_code = match_otp.group(0) if match_otp else msg
+                        
+                        sent_set = u_info.setdefault("sent_otps", set())
+                        if otp_code not in sent_set:
+                            sent_set.add(otp_code)
+                            current_bal = USER_BALANCES.get(user_id, 0.0)
+                            USER_BALANCES[user_id] = current_bal + 0.00122
+                            
+                            personal_text = (
+                                f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
+                                f"🚨 <b>YOUR NUMBER OTP RECEIVE</b>\n\n"
+                                f"📘 <b>Service :</b> {service}\n"
+                                f"🌍 <b>Country :</b> {country} ({flag})\n"
+                                f"🎯 <b>Number :</b> <code>{u_phone}</code>\n"
+                                f"🔑 <b>OTP Code :</b> <code>{otp_code}</code>\n\n"
+                                f"✉ <b>Full Message :</b>\n<code>{msg}</code>\n\n"
+                                f"💰 <b>Earned:</b> +$0.00122"
+                            )
+                            try:
+                                await application.bot.send_message(
+                                    chat_id=u_info["chat_id"], 
+                                    text=personal_text, 
+                                    parse_mode="HTML"
+                                )
+                            except Exception as per_ex:
+                                print(f"Personal Send Error: {per_ex}")
+
+            # Also pull global console for public OTP group
             headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
             res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=5.0)
             if res.status_code == 200:
@@ -132,31 +187,16 @@ async def auto_forward_console_logs(application):
                 if isinstance(hits, list):
                     for hit in hits:
                         if not isinstance(hit, dict): continue
-
                         msg = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or hit.get("msg") or ""
-                        num = str(
-                            hit.get("number") or 
-                            hit.get("full_number") or 
-                            hit.get("phone") or 
-                            hit.get("phone_number") or 
-                            hit.get("mobile") or 
-                            hit.get("receiver") or
-                            hit.get("to") or
-                            hit.get("range", "")
-                        ).strip()
+                        num = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("range", "")).strip()
                         service = hit.get("service", "SMS")
                         country = hit.get("country", "Cameroon")
 
-                        log_id = f"{num}_{msg}"
-                        if log_id in SEEN_OTP_IDS:
-                            continue
-                        
-                        SEEN_OTP_IDS.add(log_id)
-                        if len(SEEN_OTP_IDS) > 5000:
-                            SEEN_OTP_IDS.pop()
+                        g_id = f"g_{num}_{msg}"
+                        if g_id in SEEN_OTP_IDS or not msg: continue
+                        SEEN_OTP_IDS.add(g_id)
 
                         _, _, flag = get_country_info(num, country)
-                        
                         group_text = (
                             f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
                             f"📘 <b>{service} OTP RECEIVE</b>\n\n"
@@ -168,7 +208,6 @@ async def auto_forward_console_logs(application):
                         group_markup = InlineKeyboardMarkup([
                             [InlineKeyboardButton("NUMBER BOT ↗", url=f"https://t.me/{application.bot.username}")]
                         ])
-                        
                         try:
                             await application.bot.send_message(
                                 chat_id=OTP_GROUP_CHAT_ID, 
@@ -176,52 +215,11 @@ async def auto_forward_console_logs(application):
                                 reply_markup=group_markup, 
                                 parse_mode="HTML"
                             )
-                        except Exception as ex:
-                            print(f"Group Forward Error: {ex}")
+                        except: pass
 
-                        clean_log_num = ''.join(filter(str.isdigit, num))
-                        
-                        for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
-                            u_phone = str(u_info.get("phone", "")).strip()
-                            clean_u_phone = ''.join(filter(str.isdigit, u_phone))
-                            
-                            matched = False
-                            if clean_u_phone and clean_log_num:
-                                if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone) or clean_u_phone.endswith(clean_u_phone[-9:]):
-                                    if clean_u_phone[-9:] == clean_log_num[-9:]:
-                                        matched = True
-
-                            if matched:
-                                match_otp = re.search(r'\b\d{4,8}\b', msg)
-                                otp_code = match_otp.group(0) if match_otp else msg
-                                
-                                sent_set = u_info.setdefault("sent_otps", set())
-                                if otp_code not in sent_set:
-                                    sent_set.add(otp_code)
-                                    current_bal = USER_BALANCES.get(user_id, 0.0)
-                                    USER_BALANCES[user_id] = current_bal + 0.00122
-                                    
-                                    personal_text = (
-                                        f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
-                                        f"🚨 <b>YOUR NUMBER OTP RECEIVE</b>\n\n"
-                                        f"📘 <b>Service :</b> {service}\n"
-                                        f"🌍 <b>Country :</b> {country} ({flag})\n"
-                                        f"🎯 <b>Number :</b> <code>{u_phone}</code>\n"
-                                        f"🔑 <b>OTP Code :</b> <code>{otp_code}</code>\n\n"
-                                        f"✉ <b>Full Message :</b>\n<code>{msg}</code>\n\n"
-                                        f"💰 <b>Earned:</b> +$0.00122"
-                                    )
-                                    try:
-                                        await application.bot.send_message(
-                                            chat_id=u_info["chat_id"], 
-                                            text=personal_text, 
-                                            parse_mode="HTML"
-                                        )
-                                    except Exception as per_ex:
-                                        print(f"Personal Send Error: {per_ex}")
         except Exception as e:
             print(f"Background Loop Error: {e}")
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1)
 
 def create_single_number_markup(phone_num):
     _, _, flag = get_country_info(phone_num)
