@@ -28,7 +28,7 @@ def get_country_info(phone_number, api_country=""):
         if "madagascar" in c_lower: return "Madagascar", "MG", "🇲🇬"
         elif "ivory" in c_lower or "côte" in c_lower: return "Ivory Coast", "CI", "🇨🇮"
         elif "cameroon" in c_lower: return "Cameroon", "CM", "🇨🇲"
-        elif "togo" in c_lower: return "Togo", "TG", "🇹🇬"
+        elif "togo" in c_lower: return "Togo", "TG", "TG"
         elif "benin" in c_lower: return "Benin", "BJ", "🇧🇯"
         elif "tanzania" in c_lower: return "Tanzania", "TZ", "🇹🇿"
         elif "ukraine" in c_lower: return "Ukraine", "UA", "🇺🇦"
@@ -136,7 +136,6 @@ async def auto_forward_console_logs(application):
                 if not u_phone: continue
 
                 clean_u_phone = u_phone.replace("+", "").strip()
-                fetch_time = u_info.get("fetch_time", 0)
 
                 check_res = await check_number_sms(u_phone)
                 messages = []
@@ -155,7 +154,7 @@ async def auto_forward_console_logs(application):
                     elif isinstance(check_res, list):
                         messages = check_res
 
-                # Also check global console hits strictly matching the exact number
+                # Also check global console hits with smart safe matching
                 try:
                     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
                     res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
@@ -167,8 +166,16 @@ async def auto_forward_console_logs(application):
                                 hit_num = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("range", "")).strip()
                                 clean_hit_num = hit_num.replace("+", "").strip()
                                 
-                                # Exact match only to prevent fake/mixed codes
-                                if clean_hit_num and clean_hit_num == clean_u_phone:
+                                # Smart Safe Match: Match exact or last 8-9 digits to handle country code prefix differences safely
+                                is_matched = False
+                                if clean_hit_num and clean_u_phone:
+                                    if clean_hit_num == clean_u_phone:
+                                        is_matched = True
+                                    elif len(clean_hit_num) >= 8 and len(clean_u_phone) >= 8:
+                                        if clean_hit_num[-9:] == clean_u_phone[-9:] or clean_hit_num[-8:] == clean_u_phone[-8:]:
+                                            is_matched = True
+
+                                if is_matched:
                                     if hit not in messages:
                                         messages.append(hit)
                 except:
@@ -188,13 +195,10 @@ async def auto_forward_console_logs(application):
 
                     if not msg: continue
 
-                    # Ignore old messages that existed before the user requested this number session
-                    # (Preventing old/recycled messages from showing up)
                     log_id = f"{u_phone}_{msg}"
                     if log_id in SEEN_OTP_IDS:
                         continue
                     
-                    # Mark as seen
                     SEEN_OTP_IDS.add(log_id)
                     if len(SEEN_OTP_IDS) > 5000:
                         SEEN_OTP_IDS.pop()
