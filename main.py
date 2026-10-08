@@ -193,8 +193,9 @@ async def auto_forward_console_logs(application):
                             
                             matched = False
                             if clean_u_phone and clean_log_num:
-                                if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone) or clean_u_phone.endswith(clean_log_num):
-                                    matched = True
+                                if clean_u_phone == clean_log_num or clean_log_num.endswith(clean_u_phone) or clean_u_phone.endswith(clean_u_phone[-9:]):
+                                    if clean_u_phone[-9:] == clean_log_num[-9:]:
+                                        matched = True
 
                             if matched:
                                 match_otp = re.search(r'\b\d{4,8}\b', msg)
