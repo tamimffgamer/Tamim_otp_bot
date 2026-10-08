@@ -2,6 +2,7 @@ import os
 import asyncio
 import requests
 import re
+import time
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, CopyTextButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
@@ -27,11 +28,11 @@ def get_country_info(phone_number, api_country=""):
         if "madagascar" in c_lower: return "Madagascar", "MG", "🇲🇬"
         elif "ivory" in c_lower or "côte" in c_lower: return "Ivory Coast", "CI", "🇨🇮"
         elif "cameroon" in c_lower: return "Cameroon", "CM", "🇨🇲"
-        elif "togo" in c_lower: return "Togo", "TG", "TG"
+        elif "togo" in c_lower: return "Togo", "TG", "🇹🇬"
         elif "benin" in c_lower: return "Benin", "BJ", "🇧🇯"
         elif "tanzania" in c_lower: return "Tanzania", "TZ", "🇹🇿"
         elif "ukraine" in c_lower: return "Ukraine", "UA", "🇺🇦"
-        elif "kyrgyzstan" in c_lower: return "Kyrgyzstan", "KG", "KG"
+        elif "kyrgyzstan" in c_lower: return "Kyrgyzstan", "KG", "🇰🇬"
     
     if clean_num.startswith("880"): return "Bangladesh", "BD", "🇧🇩"
     elif clean_num.startswith("237"): return "Cameroon", "CM", "🇨🇲"
@@ -135,6 +136,7 @@ async def auto_forward_console_logs(application):
                 if not u_phone: continue
 
                 clean_u_phone = u_phone.replace("+", "").strip()
+                fetch_time = u_info.get("fetch_time", 0)
 
                 check_res = await check_number_sms(u_phone)
                 messages = []
@@ -153,7 +155,7 @@ async def auto_forward_console_logs(application):
                     elif isinstance(check_res, list):
                         messages = check_res
 
-                # Also check global console hits to make sure OTP is caught instantly
+                # Also check global console hits strictly matching the exact number
                 try:
                     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
                     res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
@@ -165,7 +167,8 @@ async def auto_forward_console_logs(application):
                                 hit_num = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("range", "")).strip()
                                 clean_hit_num = hit_num.replace("+", "").strip()
                                 
-                                if clean_hit_num and (clean_hit_num == clean_u_phone or clean_u_phone in clean_hit_num or clean_hit_num in clean_u_phone):
+                                # Exact match only to prevent fake/mixed codes
+                                if clean_hit_num and clean_hit_num == clean_u_phone:
                                     if hit not in messages:
                                         messages.append(hit)
                 except:
@@ -185,10 +188,13 @@ async def auto_forward_console_logs(application):
 
                     if not msg: continue
 
+                    # Ignore old messages that existed before the user requested this number session
+                    # (Preventing old/recycled messages from showing up)
                     log_id = f"{u_phone}_{msg}"
                     if log_id in SEEN_OTP_IDS:
                         continue
                     
+                    # Mark as seen
                     SEEN_OTP_IDS.add(log_id)
                     if len(SEEN_OTP_IDS) > 5000:
                         SEEN_OTP_IDS.pop()
@@ -224,7 +230,7 @@ async def auto_forward_console_logs(application):
                         except Exception as per_ex:
                             print(f"Personal Send Error: {per_ex}")
 
-            # 2. Public console logs fallback
+            # 2. Public console logs fallback for group
             headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
             res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=5.0)
             if res.status_code == 200:
@@ -344,7 +350,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ACTIVE_USER_NUMBERS[user_id] = {
                 "phone": phone,
                 "chat_id": update.effective_chat.id,
-                "sent_otps": set()
+                "sent_otps": set(),
+                "fetch_time": time.time()
             }
 
             country_name, _, flag = get_country_info(phone)
@@ -413,7 +420,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ACTIVE_USER_NUMBERS[user_id] = {
                 "phone": phone,
                 "chat_id": query.message.chat_id,
-                "sent_otps": set()
+                "sent_otps": set(),
+                "fetch_time": time.time()
             }
 
             country_name, _, flag = get_country_info(phone)
