@@ -147,20 +147,25 @@ async def auto_forward_console_logs(application):
                         otp_code_g = match_otp_g.group(0)
 
                         _, _, flag = get_country_info(num, country)
-                        clean_console_num = num.replace("+", "").strip()
+                        
+                        # শুধুমাত্র ডিজিটগুলো ফিল্টার করে নেওয়া
+                        clean_console_num = re.sub(r'\D', '', num)
                         
                         for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
-                            u_phone = str(u_info.get("phone", "")).replace("+", "").strip()
+                            u_phone_raw = str(u_info.get("phone", ""))
+                            u_clean = re.sub(r'\D', '', u_phone_raw)
                             fetch_time = u_info.get("fetch_time", 0)
                             
                             if (current_time - fetch_time) > 1200:
                                 continue
 
-                            if u_phone and clean_console_num:
-                                u_suffix = u_phone[-9:] if len(u_phone) >= 9 else u_phone
+                            if u_clean and clean_console_num:
+                                # শেষ ৯টি ডিজিট বের করা
+                                u_suffix = u_clean[-9:] if len(u_clean) >= 9 else u_clean
                                 c_suffix = clean_console_num[-9:] if len(clean_console_num) >= 9 else clean_console_num
                                 
-                                if (clean_console_num == u_phone) or (u_suffix == c_suffix) or (u_phone in clean_console_num) or (clean_console_num in u_phone):
+                                # শেষের ৯ ডিজিট হুবহু মিলে গেলে কোড ফরোয়ার্ড হবে
+                                if u_suffix and c_suffix and (u_suffix == c_suffix):
                                     sent_set = u_info.setdefault("sent_otps", set())
                                     if otp_code_g not in sent_set:
                                         sent_set.add(otp_code_g)
