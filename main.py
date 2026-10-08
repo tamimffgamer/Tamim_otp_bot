@@ -130,139 +130,91 @@ async def fetch_live_traffic_detailed():
 async def auto_forward_console_logs(application):
     while True:
         try:
-            # 1. Check personal active numbers
-            for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
-                u_phone = str(u_info.get("phone", "")).strip()
-                if not u_phone: continue
-
-                clean_u_phone = u_phone.replace("+", "").strip()
-
-                check_res = await check_number_sms(u_phone)
-                messages = []
-                
-                if check_res:
-                    if isinstance(check_res, dict):
-                        data_field = check_res.get("data") or check_res.get("messages") or check_res.get("sms") or check_res.get("message")
-                        if isinstance(data_field, list):
-                            messages = data_field
-                        elif isinstance(data_field, dict):
-                            messages = [data_field]
-                        elif isinstance(data_field, str) and data_field:
-                            messages = [{"message": data_field}]
-                        if not messages and ("message" in check_res or "text" in check_res or "sms" in check_res):
-                            messages = [check_res]
-                    elif isinstance(check_res, list):
-                        messages = check_res
-
-                # Also check global console hits with smart safe matching
-                try:
-                    headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
-                    res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
-                    if res.status_code == 200:
-                        hits = res.json().get("data", [])
-                        if isinstance(hits, list):
-                            for hit in hits:
-                                if not isinstance(hit, dict): continue
-                                hit_num = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("range", "")).strip()
-                                clean_hit_num = hit_num.replace("+", "").strip()
-                                
-                                is_matched = False
-                                if clean_hit_num and clean_u_phone:
-                                    if clean_hit_num == clean_u_phone:
-                                        is_matched = True
-                                    elif len(clean_hit_num) >= 8 and len(clean_u_phone) >= 8:
-                                        if clean_hit_num[-9:] == clean_u_phone[-9:] or clean_hit_num[-8:] == clean_u_phone[-8:]:
-                                            is_matched = True
-
-                                if is_matched:
-                                    if hit not in messages:
-                                        messages.append(hit)
-                except:
-                    pass
-
-                for msg_item in messages:
-                    msg = ""
-                    service = "SMS"
-                    country = "International"
-
-                    if isinstance(msg_item, str):
-                        msg = msg_item
-                    elif isinstance(msg_item, dict):
-                        msg = msg_item.get("message") or msg_item.get("text") or msg_item.get("sms") or msg_item.get("content") or msg_item.get("msg") or ""
-                        service = msg_item.get("service", "SMS")
-                        country = msg_item.get("country", "International")
-
-                    if not msg: continue
-
-                    log_id = f"{u_phone}_{msg}"
-                    if log_id in SEEN_OTP_IDS:
-                        continue
-                    
-                    SEEN_OTP_IDS.add(log_id)
-                    if len(SEEN_OTP_IDS) > 5000:
-                        SEEN_OTP_IDS.pop()
-
-                    _, _, flag = get_country_info(u_phone, country)
-
-                    match_otp = re.search(r'\b\d{4,8}\b', msg)
-                    otp_code = match_otp.group(0) if match_otp else msg
-                    
-                    sent_set = u_info.setdefault("sent_otps", set())
-                    if otp_code not in sent_set:
-                        sent_set.add(otp_code)
-                        current_bal = USER_BALANCES.get(user_id, 0.0)
-                        USER_BALANCES[user_id] = current_bal + 0.00122
-                        
-                        personal_text = (
-                            f"🟢 <b>SUCCESSFUL OTP RECEIVED</b>\n\n"
-                            f"🌐 <b>Service :</b> {service}\n"
-                            f"🌍 <b>Country :</b> {country} ({flag})\n"
-                            f"🎯 <b>Number :</b> <code>{u_phone}</code>\n"
-                            f"🔑 <b>OTP Code :</b> <code>{otp_code}</code>\n\n"
-                            f"✉ <b>Full Message :</b>\n<code>{msg}</code>\n\n"
-                            f"💰 <b>Earned :</b> +$0.00122"
-                        )
-                        personal_markup = InlineKeyboardMarkup([
-                            [InlineKeyboardButton(text=f"📋 Copy OTP: {otp_code}", copy_text=CopyTextButton(text=otp_code))],
-                            [InlineKeyboardButton("🔄 Change Number", callback_data="change_number")]
-                        ])
-                        try:
-                            await application.bot.send_message(
-                                chat_id=u_info["chat_id"], 
-                                text=personal_text, 
-                                reply_markup=personal_markup,
-                                parse_mode="HTML"
-                            )
-                            await success_otp(u_phone)
-                        except Exception as per_ex:
-                            print(f"Personal Send Error: {per_ex}")
-
-            # 2. Public console logs fallback for group
+            # গ্লোবাল কনসোল থেকে লাইভ হিট ফেচ করা
             headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
-            res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=5.0)
+            res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=4.0)
+            
             if res.status_code == 200:
                 res_json = res.json()
                 hits = res_json.get("data", [])
+                
                 if isinstance(hits, list):
                     for hit in hits:
                         if not isinstance(hit, dict): continue
+                        
                         msg = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or hit.get("msg") or ""
-                        num = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("range", "")).strip()
+                        hit_num = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("range", "")).strip()
                         service = hit.get("service", "SMS")
                         country = hit.get("country", "International")
 
-                        g_id = f"g_{num}_{msg}"
-                        if g_id in SEEN_OTP_IDS or not msg: continue
+                        if not msg: continue
+
+                        g_id = f"{hit_num}_{msg}"
+                        
+                        # ১. ব্যক্তিগত ব্যবহারকারীদের জন্য চেক করা যাদের নাম্বার বর্তমানে একটিভ আছে
+                        for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
+                            u_phone = str(u_info.get("phone", "")).strip()
+                            if not u_phone: continue
+
+                            clean_u_phone = u_phone.replace("+", "").strip()
+                            clean_hit_num = hit_num.replace("+", "").strip()
+
+                            is_matched = False
+                            if clean_hit_num and clean_u_phone:
+                                if clean_hit_num == clean_u_phone:
+                                    is_matched = True
+                                elif len(clean_hit_num) >= 8 and len(clean_u_phone) >= 8:
+                                    if clean_hit_num[-9:] == clean_u_phone[-9:] or clean_hit_num[-8:] == clean_u_phone[-8:]:
+                                        is_matched = True
+
+                            if is_matched:
+                                sent_set = u_info.setdefault("sent_otps", set())
+                                match_otp = re.search(r'\b\d{4,8}\b', msg)
+                                otp_code = match_otp.group(0) if match_otp else msg
+
+                                if otp_code not in sent_set:
+                                    sent_set.add(otp_code)
+                                    current_bal = USER_BALANCES.get(user_id, 0.0)
+                                    USER_BALANCES[user_id] = current_bal + 0.00122
+                                    
+                                    _, _, flag = get_country_info(u_phone, country)
+                                    personal_text = (
+                                        f"🟢 <b>SUCCESSFUL OTP RECEIVED</b>\n\n"
+                                        f"🌐 <b>Service :</b> {service}\n"
+                                        f"🌍 <b>Country :</b> {country} ({flag})\n"
+                                        f"🎯 <b>Number :</b> <code>{u_phone}</code>\n"
+                                        f"🔑 <b>OTP Code :</b> <code>{otp_code}</code>\n\n"
+                                        f"✉ <b>Full Message :</b>\n<code>{msg}</code>\n\n"
+                                        f"💰 <b>Earned :</b> +$0.00122"
+                                    )
+                                    personal_markup = InlineKeyboardMarkup([
+                                        [InlineKeyboardButton(text=f"📋 Copy OTP: {otp_code}", copy_text=CopyTextButton(text=otp_code))],
+                                        [InlineKeyboardButton("🔄 Change Number", callback_data="change_number")]
+                                    ])
+                                    try:
+                                        await application.bot.send_message(
+                                            chat_id=u_info["chat_id"], 
+                                            text=personal_text, 
+                                            reply_markup=personal_markup,
+                                            parse_mode="HTML"
+                                        )
+                                        await success_otp(u_phone)
+                                    except Exception as per_ex:
+                                        print(f"Personal Send Error: {per_ex}")
+
+                        # ২. পাবলিক গ্রুপে অটো ফরোয়ার্ড করার লজিক
+                        if g_id in SEEN_OTP_IDS: continue
                         SEEN_OTP_IDS.add(g_id)
+                        if len(SEEN_OTP_IDS) > 5000: SEEN_OTP_IDS.pop(0)
 
                         match_otp_g = re.search(r'\b\d{4,8}\b', msg)
                         otp_code_g = match_otp_g.group(0) if match_otp_g else msg
 
-                        _, _, flag = get_country_info(num, country)
+                        _, _, flag = get_country_info(hit_num, country)
                         group_text = (
                             f"🟢 <b>{service} OTP RECEIVED</b>\n\n"
                             f"🌍 <b>Country :</b> {country} ({flag})\n"
-                            f"🎯 <b>Number :</b> <code>{num}</code>\n"
+                            f"🎯 <b>Number :</b> <code>{hit_num}</code>\n"
                             f"🔑 <b>Code :</b> <code>{otp_code_g}</code>\n\n"
                             f"✉ <b>Message :</b>\n<code>{msg}</code>"
                         )
