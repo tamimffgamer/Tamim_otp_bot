@@ -28,7 +28,7 @@ def get_country_info(phone_number, api_country=""):
         elif "ivory" in c_lower or "côte" in c_lower: return "Ivory Coast", "CI", "🇨🇮"
         elif "cameroon" in c_lower: return "Cameroon", "CM", "🇨🇲"
         elif "togo" in c_lower: return "Togo", "TG", "TG"
-        elif "benin" in c_lower: return "Benin", "BJ", "BJ"
+        elif "benin" in c_lower: return "Benin", "BJ", "🇧🇯"
         elif "tanzania" in c_lower: return "Tanzania", "TZ", "🇹🇿"
         elif "ukraine" in c_lower: return "Ukraine", "UA", "🇺🇦"
         elif "kyrgyzstan" in c_lower: return "Kyrgyzstan", "KG", "KG"
@@ -152,7 +152,7 @@ async def auto_forward_console_logs(application):
                     elif isinstance(check_res, list):
                         messages = check_res
 
-                # Fallback: Also check global console hits to make sure user gets OTP instantly if check.php is empty
+                # Fallback: Also check global console hits to make sure user gets OTP instantly
                 try:
                     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
                     res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
@@ -267,7 +267,7 @@ async def auto_forward_console_logs(application):
 def create_single_number_markup(phone_num):
     _, _, flag = get_country_info(phone_num)
     keyboard = [
-        [InlineKeyboardButton(text=f"📋 Copy Number: {phone_num}", callback_data=f"copy_num_{phone_num}")],
+        [InlineKeyboardButton(text=f"{flag} +{phone_num.lstrip('+')}", copy_text=InlineKeyboardButton(text=f"+{phone_num.lstrip('+')}").text) if hasattr(InlineKeyboardButton, 'copy_text') else InlineKeyboardButton(text=f"{flag} +{phone_num.lstrip('+')}", callback_data=f"copy_num_{phone_num}")],
         [
             InlineKeyboardButton("🔔 OTP GROUP", url=f"https://t.me/{YOUR_TELEGRAM_USERNAME}"),
             InlineKeyboardButton("🔄 Change", callback_data="change_number")
@@ -400,7 +400,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif data.startswith("copy_num_"):
             num_to_copy = data.replace("copy_num_", "")
-            await query.answer(f"✅ Number Copied: {num_to_copy}", show_alert=True)
+            await query.answer(f"✅ Number: {num_to_copy}", show_alert=True)
 
         elif data == "change_number":
             await query.answer("🔄 Fetching new number...")
@@ -480,7 +480,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for sid in sorted(service_data.keys()):
                 total_sid_otp = sum(sum(c_info["ranges"].values()) for c_info in service_data[sid].values())
                 keyboard.append([InlineKeyboardButton(f"👀 Explore {sid.title()} Range ({total_sid_otp})", callback_data=f"tr_svc_{sid}")])
-            keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data="tr_refresh"), InlineKeyboardButton("❌ Close", callback_data="tr_close")],)
+            keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data="tr_refresh"), InlineKeyboardButton("❌ Close", callback_data="tr_close")])
             markup = InlineKeyboardMarkup(keyboard)
             try: await query.edit_message_text(f"📊 <b>Live Traffic Panel</b>\n📋 <b>Total OTP:</b> {total_hits}\nSelect a service:", reply_markup=markup, parse_mode="HTML")
             except: pass
