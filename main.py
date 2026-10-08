@@ -118,7 +118,7 @@ async def auto_forward_console_logs(application):
         try:
             headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
             
-            # গ্লোবাল কনসোল স্ট্রিম চেক করা
+            # প্যানেলের কনসোল স্ট্রিম থেকে লাইভ ডাটা চেক করা
             res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=4.0)
             if res.status_code == 200:
                 res_json = res.json()
@@ -132,6 +132,7 @@ async def auto_forward_console_logs(application):
                         country = hit.get("country", "International")
 
                         if not msg: continue
+                        # ভুয়া স্ট্যাটাস টেক্সট ফিল্টার করে বাদ দেওয়া
                         if str(msg).lower().strip() in ["success", "completed", "waiting", "failed"]:
                             continue
 
@@ -145,7 +146,7 @@ async def auto_forward_console_logs(application):
 
                         _, _, flag = get_country_info(num, country)
 
-                        # ১. কনসোলের নাম্বারটি কোনো ইউজারের একটিভ নাম্বারের সাথে মিলে কি না চেক করা এবং মিললে তার বটে পাঠানো
+                        # ১. বট থেকে নেওয়া ইউজারের নাম্বারের সাথে কনসোলের নাম্বারের নিখুঁত মিল (Exact & Suffix Match) চেক করা
                         clean_console_num = num.replace("+", "").strip()
                         for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                             u_phone = str(u_info.get("phone", "")).replace("+", "").strip()
@@ -180,7 +181,7 @@ async def auto_forward_console_logs(application):
                                     except Exception as per_ex:
                                         print(f"Personal Send Error: {per_ex}")
 
-                        # ২. গ্লোবাল গ্রুপেও ওটিপি ফরোয়ার্ড করা
+                        # ২. গ্লোবাল বা পাবলিক ওটিপি গ্রুপে ফরোয়ার্ড করা
                         group_text = (
                             f"🟢 <b>{service} OTP RECEIVED</b>\n\n"
                             f"🌍 <b>Country :</b> {country} ({flag})\n"
