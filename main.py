@@ -1,773 +1,507 @@
 import os
 import asyncio
 import requests
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
-
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    ReplyKeyboardMarkup,
-    CopyTextButton,
-)
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    filters,
-)
-
-# =========================================================
-# ENVIRONMENT VARIABLES
-# =========================================================
+import re
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, CopyTextButton
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-MINO_API_KEY = os.environ.get("MINO_API_KEY")
 
+MINO_API_KEY = "mino_live_a5db48f1d607f390b0d3bd1fccfc1d17"
 BASE_API_URL = "https://minosms.com"
-
 YOUR_TELEGRAM_USERNAME = "smm_otp_grup"
 SUPPORT_USERNAME = "tmtamimmia"
-
-# Your Telegram group
 OTP_GROUP_CHAT_ID = -1004436883235
-
-DEFAULT_RANGE = "23762XXX"
-
-
-# =========================================================
-# BASIC CHECK
-# =========================================================
-
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN is missing in Render Environment Variables.")
-
-if not MINO_API_KEY:
-    raise RuntimeError("MINO_API_KEY is missing in Render Environment Variables.")
-
-
-# =========================================================
-# USER DATA
-# =========================================================
 
 USER_STATES = {}
 USER_RANGES = {}
-USER_BALANCES = {}
-USER_WITHDRAW_INFO = {}
-
-# user_id -> active number information
-ACTIVE_USER_NUMBERS = {}
-
-
-# =========================================================
-# COUNTRY INFORMATION
-# =========================================================
+USER_BALANCES = {}  
+USER_WITHDRAW_INFO = {} 
+SEEN_OTP_IDS = set()
+ACTIVE_USER_NUMBERS = {} 
 
 def get_country_info(phone_number, api_country=""):
     clean_num = str(phone_number).replace("+", "").strip()
-
     if api_country:
-        c = str(api_country).lower()
-
-        if "madagascar" in c:
-            return "Madagascar", "MG", "🇲🇬"
-
-        if "ivory" in c or "côte" in c or "cote" in c:
-            return "Ivory Coast", "CI", "🇨🇮"
-
-        if "cameroon" in c:
-            return "Cameroon", "CM", "🇨🇲"
-
-        if "togo" in c:
-            return "Togo", "TG", "🇹🇬"
-
-        if "benin" in c:
-            return "Benin", "BJ", "🇧🇯"
-
-        if "tanzania" in c:
-            return "Tanzania", "TZ", "🇹🇿"
-
-        if "ukraine" in c:
-            return "Ukraine", "UA", "🇺🇦"
-
-        if "kyrgyzstan" in c:
-            return "Kyrgyzstan", "KG", "🇰🇬"
-
-    if clean_num.startswith("880"):
-        return "Bangladesh", "BD", "🇧🇩"
-
-    if clean_num.startswith("237"):
-        return "Cameroon", "CM", "🇨🇲"
-
-    if clean_num.startswith("225"):
-        return "Ivory Coast", "CI", "🇨🇮"
-
-    if clean_num.startswith("228"):
-        return "Togo", "TG", "🇹🇬"
-
-    if clean_num.startswith("261"):
-        return "Madagascar", "MG", "🇲🇬"
-
-    if clean_num.startswith("229"):
-        return "Benin", "BJ", "🇧🇯"
-
-    if clean_num.startswith("255"):
-        return "Tanzania", "TZ", "🇹🇿"
-
-    if clean_num.startswith("380"):
-        return "Ukraine", "UA", "🇺🇦"
-
-    if clean_num.startswith("996"):
-        return "Kyrgyzstan", "KG", "🇰🇬"
-
-    return "International", "INT", "🌍"
-
-
-# =========================================================
-# MINO API - GET NUMBER
-# =========================================================
+        c_lower = api_country.lower()
+        if "madagascar" in c_lower: return "Madagascar", "MG", "🇲🇬"
+        elif "ivory" in c_lower or "côte" in c_lower: return "Ivory Coast", "CI", "🇨🇮"
+        elif "cameroon" in c_lower: return "Cameroon", "CM", "🇨🇲"
+        elif "togo" in c_lower: return "Togo", "TG", "🇹🇬"
+        elif "benin" in c_lower: return "Benin", "BJ", "🇧🇯"
+        elif "tanzania" in c_lower: return "Tanzania", "TZ", "🇹🇿"
+        elif "ukraine" in c_lower: return "Ukraine", "UA", "🇺🇦"
+        elif "kyrgyzstan" in c_lower: return "Kyrgyzstan", "KG", "KG"
+    
+    if clean_num.startswith("880"): return "Bangladesh", "BD", "🇧🇩"
+    elif clean_num.startswith("237"): return "Cameroon", "CM", "🇨🇲"
+    elif clean_num.startswith("225"): return "Ivory Coast", "CI", "🇨🇮"
+    elif clean_num.startswith("228"): return "Togo", "TG", "🇹🇬"
+    elif clean_num.startswith("261"): return "Madagascar", "MG", "🇲🇬"
+    else: return "International", "INT", "🌍"
 
 def _sync_get_mino_real_number(target_range):
-
     headers = {
         "mauthapi": MINO_API_KEY,
         "Accept": "application/json",
-        "Content-Type": "application/json",
+        "Content-Type": "application/json"
     }
-
     clean_rid = str(target_range).upper().strip()
-
-    payload = {
-        "rid": clean_rid
-    }
-
+    payload = {"rid": clean_rid}
     try:
-        response = requests.post(
-            f"{BASE_API_URL}/getnumber.php",
-            headers=headers,
-            json=payload,
-            timeout=10,
-        )
-
-        print("GET NUMBER STATUS:", response.status_code)
-        print("GET NUMBER RESPONSE:", response.text[:1000])
-
-        if response.status_code != 200:
-            return None, None
-
-        try:
-            data_json = response.json()
-        except Exception:
-            return None, None
-
-        data = data_json.get("data", {})
-
-        if not isinstance(data, dict):
-            data = {}
-
-        phone = (
-            data.get("full_number")
-            or data.get("national_number")
-            or data.get("phone")
-            or data.get("number")
-        )
-
-        if phone:
-            return str(phone), clean_rid
-
+        res = requests.post(f"{BASE_API_URL}/getnumber.php", headers=headers, json=payload, timeout=5.0)
+        if res.status_code == 200:
+            res_data = res.json()
+            data = res_data.get("data", {})
+            phone = data.get("full_number") or data.get("national_number") or data.get("phone") or data.get("number")
+            if phone:
+                return str(phone), str(clean_rid)
     except Exception as e:
-        print("MINO GET NUMBER ERROR:", e)
-
+        print(f"MINO API Error: {e}")
     return None, None
 
+async def get_mino_real_number(target_range="23762XXX"):
+    return await asyncio.to_thread(_sync_get_mino_real_number, target_range)
 
-async def get_mino_real_number(target_range):
-    return await asyncio.to_thread(
-        _sync_get_mino_real_number,
-        target_range
-    )
-
-
-# =========================================================
-# LIVE TRAFFIC
-# =========================================================
-
-def _sync_fetch_live_traffic():
-
-    headers = {
-        "mauthapi": MINO_API_KEY,
-        "Accept": "application/json",
-    }
-
+def _sync_check_number_sms(phone_number):
+    headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
+    clean_num = str(phone_number).strip()
     try:
-        response = requests.get(
-            f"{BASE_API_URL}/console.php",
-            headers=headers,
-            timeout=10,
-        )
-
-        print("CONSOLE STATUS:", response.status_code)
-
-        if response.status_code != 200:
-            return [], 0
-
-        try:
-            data = response.json()
-        except Exception:
-            return [], 0
-
-        hits = data.get("data", [])
-
-        if not isinstance(hits, list):
-            return [], 0
-
-        return hits, len(hits)
-
+        res = requests.get(f"{BASE_API_URL}/check.php?api_key={MINO_API_KEY}&number={clean_num}", headers=headers, timeout=4.0)
+        if res.status_code == 200:
+            return res.json()
     except Exception as e:
-        print("LIVE TRAFFIC ERROR:", e)
+        print(f"Check SMS API Error: {e}")
+    return None
 
-    return [], 0
+async def check_number_sms(phone_number):
+    return await asyncio.to_thread(_sync_check_number_sms, phone_number)
 
-
-async def fetch_live_traffic():
-    return await asyncio.to_thread(_sync_fetch_live_traffic)
-
-
-# =========================================================
-# BUILD TRAFFIC DATA
-# =========================================================
-
-def build_traffic_data(hits):
-
-    service_data = {}
-
-    for hit in hits:
-
-        if not isinstance(hit, dict):
-            continue
-
-        service = str(
-            hit.get("service")
-            or "SMS"
-        ).upper().strip()
-
-        country = str(
-            hit.get("country")
-            or ""
-        ).strip()
-
-        number_or_range = (
-            hit.get("range")
-            or hit.get("number")
-            or hit.get("full_number")
-            or hit.get("phone")
-            or ""
-        )
-
-        if not number_or_range:
-            continue
-
-        value = str(number_or_range).strip()
-
-        country_name, country_code, flag = get_country_info(
-            value,
-            country
-        )
-
-        if service not in service_data:
-            service_data[service] = {}
-
-        if country_code not in service_data[service]:
-            service_data[service][country_code] = {
-                "name": country_name,
-                "flag": flag,
-                "ranges": {}
-            }
-
-        ranges = service_data[service][country_code]["ranges"]
-
-        ranges[value] = ranges.get(value, 0) + 1
-
-    return service_data
-
-
-# =========================================================
-# NUMBER BUTTON
-# =========================================================
-
-def create_number_markup(phone_number):
-
-    _, _, flag = get_country_info(phone_number)
-
-    keyboard = [
-
-        [
-            InlineKeyboardButton(
-                text=f"{flag} {phone_number}",
-                copy_text=CopyTextButton(text=str(phone_number))
-            )
-        ],
-
-        [
-            InlineKeyboardButton(
-                "🔔 OTP GROUP",
-                url=f"https://t.me/{YOUR_TELEGRAM_USERNAME}"
-            ),
-
-            InlineKeyboardButton(
-                "🔄 Change",
-                callback_data="change_number"
-            )
-        ],
-
-        [
-            InlineKeyboardButton(
-                "🔙 Back",
-                callback_data="back_home"
-            )
-        ]
-
-    ]
-
-    return InlineKeyboardMarkup(keyboard)
-
-
-# =========================================================
-# START
-# =========================================================
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    user_id = update.effective_user.id
-
-    USER_STATES[user_id] = None
-
-    keyboard = [
-
-        ["📞 Get API Number", "⚙ Set Range"],
-
-        ["🟢 Live Traffic", "💳 Balance"],
-
-        ["💬 Support", "📣 OTP Group"]
-
-    ]
-
-    markup = ReplyKeyboardMarkup(
-        keyboard,
-        resize_keyboard=True
-    )
-
-    await update.message.reply_text(
-        "🤖 <b>Welcome to MINO SMS Number Bot!</b>\n\n"
-        "নিচের মেনু থেকে একটি অপশন নির্বাচন করুন।",
-        reply_markup=markup,
-        parse_mode="HTML"
-    )
-
-
-# =========================================================
-# HELP
-# =========================================================
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    markup = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "📞 Support",
-                url=f"https://t.me/{SUPPORT_USERNAME}"
-            )
-        ]
-    ])
-
-    await update.message.reply_text(
-        "💬 <b>Support Center</b>\n\n"
-        "সমস্যা হলে নিচের বাটনে যোগাযোগ করুন।",
-        reply_markup=markup,
-        parse_mode="HTML"
-    )
-
-
-# =========================================================
-# GET NUMBER
-# =========================================================
-
-async def handle_get_number(update, user_id):
-
-    wait_message = await update.message.reply_text(
-        "⏳ <b>MINO panel থেকে number নেওয়া হচ্ছে...</b>",
-        parse_mode="HTML"
-    )
-
-    user_range = USER_RANGES.get(
-        user_id,
-        DEFAULT_RANGE
-    )
-
-    phone, used_range = await get_mino_real_number(
-        user_range
-    )
-
+def _sync_success_otp(phone_number):
+    headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
+    clean_num = str(phone_number).strip()
     try:
-        await wait_message.delete()
-    except Exception:
+        requests.get(f"{BASE_API_URL}/success_otp.php?api_key={MINO_API_KEY}&number={clean_num}", headers=headers, timeout=3.0)
+    except:
         pass
 
-    if not phone:
+async def success_otp(phone_number):
+    await asyncio.to_thread(_sync_success_otp, phone_number)
 
-        await update.message.reply_text(
-            f"❌ <b>এই range-এ কোনো number পাওয়া যায়নি।</b>\n\n"
-            f"Range: <code>{user_range}</code>",
-            parse_mode="HTML"
-        )
+def _sync_fetch_live_traffic_detailed():
+    headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
+    service_data = {}
+    total_hits = 0
+    try:
+        res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=5.0)
+        if res.status_code == 200:
+            res_json = res.json()
+            hits = res_json.get("data", [])
+            if isinstance(hits, list):
+                total_hits = len(hits)
+                for hit in hits:
+                    if not isinstance(hit, dict): continue
+                    r = hit.get("range") or hit.get("number") or hit.get("full_number", "") or hit.get("phone", "")
+                    sid = str(hit.get("service", "FACEBOOK")).upper().strip()
+                    api_country = hit.get("country", "")
+                    
+                    if r:
+                        clean_r = str(r).strip()
+                        c_name, c_code, c_flag = get_country_info(clean_r, api_country)
+                        
+                        if sid not in service_data:
+                            service_data[sid] = {}
+                        if c_code not in service_data[sid]:
+                            service_data[sid][c_code] = {"name": c_name, "flag": c_flag, "ranges": {}}
+                        
+                        ranges_dict = service_data[sid][c_code]["ranges"]
+                        if clean_r in ranges_dict:
+                            ranges_dict[clean_r] += 1
+                        else:
+                            ranges_dict[clean_r] = 1
+    except Exception as e:
+        print(f"Detailed Traffic Error: {e}")
+    return service_data, total_hits
 
-        return
+async def fetch_live_traffic_detailed():
+    return await asyncio.to_thread(_sync_fetch_live_traffic_detailed)
 
-    ACTIVE_USER_NUMBERS[user_id] = {
-        "phone": phone,
-        "range": used_range,
-        "chat_id": update.effective_chat.id,
-    }
+async def auto_forward_console_logs(application):
+    while True:
+        try:
+            # 1. Check personal active numbers
+            for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
+                u_phone = str(u_info.get("phone", "")).strip()
+                if not u_phone: continue
 
-    country_name, country_code, flag = get_country_info(phone)
+                check_res = await check_number_sms(u_phone)
+                if check_res:
+                    messages = []
+                    if isinstance(check_res, dict):
+                        data_field = check_res.get("data") or check_res.get("messages") or check_res.get("sms") or check_res.get("message")
+                        if isinstance(data_field, list):
+                            messages = data_field
+                        elif isinstance(data_field, dict):
+                            messages = [data_field]
+                        elif isinstance(data_field, str) and data_field:
+                            messages = [{"message": data_field}]
+                        elif "message" in check_res or "text" in check_res:
+                            messages = [check_res]
+                    elif isinstance(check_res, list):
+                        messages = check_res
 
-    markup = create_number_markup(phone)
+                    for msg_item in messages:
+                        if isinstance(msg_item, str):
+                            msg = msg_item
+                            service = "SMS"
+                            country = "Unknown"
+                        elif isinstance(msg_item, dict):
+                            msg = msg_item.get("message") or msg_item.get("text") or msg_item.get("sms") or msg_item.get("content") or msg_item.get("msg") or ""
+                            service = msg_item.get("service", "SMS")
+                            country = msg_item.get("country", "International")
+                        else:
+                            continue
 
-    text = (
-        "✅ <b>Number Successfully Allocated</b>\n\n"
-        f"🌍 <b>Country:</b> {flag} {country_name}\n"
-        f"🔢 <b>Number:</b> <code>{phone}</code>\n"
-        f"⚙️ <b>Range:</b> <code>{used_range}</code>\n\n"
-        "🔄 নতুন number নিতে <b>Change</b> চাপুন।"
-    )
+                        if not msg: continue
 
-    await update.message.reply_text(
-        text,
-        reply_markup=markup,
-        parse_mode="HTML"
-    )
+                        log_id = f"{u_phone}_{msg}"
+                        if log_id in SEEN_OTP_IDS:
+                            continue
+                        
+                        SEEN_OTP_IDS.add(log_id)
+                        if len(SEEN_OTP_IDS) > 5000:
+                            SEEN_OTP_IDS.pop()
 
+                        _, _, flag = get_country_info(u_phone, country)
 
-# =========================================================
-# MESSAGE HANDLER
-# =========================================================
+                        match_otp = re.search(r'\b\d{4,8}\b', msg)
+                        otp_code = match_otp.group(0) if match_otp else msg
+                        
+                        sent_set = u_info.setdefault("sent_otps", set())
+                        if otp_code not in sent_set:
+                            sent_set.add(otp_code)
+                            current_bal = USER_BALANCES.get(user_id, 0.0)
+                            USER_BALANCES[user_id] = current_bal + 0.00122
+                            
+                            personal_text = (
+                                f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
+                                f"🚨 <b>YOUR NUMBER OTP RECEIVE</b>\n\n"
+                                f"📘 <b>Service :</b> {service}\n"
+                                f"🌍 <b>Country :</b> {country} ({flag})\n"
+                                f"🎯 <b>Number :</b> <code>{u_phone}</code>\n"
+                                f"🔑 <b>OTP Code :</b> <code>{otp_code}</code>\n\n"
+                                f"✉ <b>Full Message :</b>\n<code>{msg}</code>\n\n"
+                                f"💰 <b>Earned:</b> +$0.00122"
+                            )
+                            try:
+                                await application.bot.send_message(
+                                    chat_id=u_info["chat_id"], 
+                                    text=personal_text, 
+                                    parse_mode="HTML"
+                                )
+                                await success_otp(u_phone)
+                            except Exception as per_ex:
+                                print(f"Personal Send Error: {per_ex}")
+
+            # 2. Public console logs fallback
+            headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
+            res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=5.0)
+            if res.status_code == 200:
+                res_json = res.json()
+                hits = res_json.get("data", [])
+                if isinstance(hits, list):
+                    for hit in hits:
+                        if not isinstance(hit, dict): continue
+                        msg = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or hit.get("msg") or ""
+                        num = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("range", "")).strip()
+                        service = hit.get("service", "SMS")
+                        country = hit.get("country", "International")
+
+                        g_id = f"g_{num}_{msg}"
+                        if g_id in SEEN_OTP_IDS or not msg: continue
+                        SEEN_OTP_IDS.add(g_id)
+
+                        _, _, flag = get_country_info(num, country)
+                        group_text = (
+                            f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
+                            f"📘 <b>{service} OTP RECEIVE</b>\n\n"
+                            f"🌍 <b>Country :</b> {country} ({flag})\n"
+                            f"🎯 <b>Number :</b> <code>{num}</code>\n"
+                            f"🗣 <b>Language :</b> English\n\n"
+                            f"✉ <b>Message :</b>\n<code>{msg}</code>"
+                        )
+                        group_markup = InlineKeyboardMarkup([
+                            [InlineKeyboardButton("NUMBER BOT ↗", url=f"https://t.me/{application.bot.username}")]
+                        ])
+                        try:
+                            await application.bot.send_message(
+                                chat_id=OTP_GROUP_CHAT_ID, 
+                                text=group_text, 
+                                reply_markup=group_markup, 
+                                parse_mode="HTML"
+                            )
+                        except: pass
+
+        except Exception as e:
+            print(f"Background Loop Error: {e}")
+        await asyncio.sleep(1)
+
+def create_single_number_markup(phone_num):
+    _, _, flag = get_country_info(phone_num)
+    keyboard = [
+        [InlineKeyboardButton(text=f"{flag} {phone_num}", copy_text=CopyTextButton(text=phone_num))],
+        [
+            InlineKeyboardButton("🔔 OTP GROUP", url=f"https://t.me/{YOUR_TELEGRAM_USERNAME}"),
+            InlineKeyboardButton("🔄 Change", callback_data="change_number")
+        ],
+        [InlineKeyboardButton("🔙 Back", callback_data="back_home")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        user_id = update.effective_user.id
+        USER_STATES[user_id] = None
+        reply_keyboard = [
+            ["📞 Get API Number", "⚙ Set Range"],
+            ["🟢 Live Traffic", "💳 Balance"],
+            ["💬 Support", "📣 OTP Group"]
+        ]
+        markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
+        await update.message.reply_text("Welcome to MINO SMS Number bot! 🤖\nPlease select an option from the menu below:", reply_markup=markup)
+    except Exception as e:
+        print(f"Start Error: {e}")
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        support_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📞 সাপোর্টে যোগাযোগ করুন", url=f"https://t.me/{SUPPORT_USERNAME}")]
+        ])
+        await update.message.reply_text("💬 <b>সাপোর্ট সেন্টার</b>\n\nযেকোনো সমস্যা থাকলে নিচের বাটনে যোগাযোগ করুন:", reply_markup=support_markup, parse_mode="HTML")
+    except Exception as e:
+        print(f"Help Error: {e}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     try:
-
         user_id = update.effective_user.id
-        text = (update.message.text or "").strip()
-
+        text = update.message.text or ""
         state = USER_STATES.get(user_id)
 
-        # ---------------------------------------------
-        # RANGE INPUT
-        # ---------------------------------------------
-
         if state == "WAITING_FOR_RANGE":
+            clean_text = text.strip()
+            if len(clean_text) >= 3:
+                USER_STATES[user_id] = None
+                USER_RANGES[user_id] = clean_text
+                await update.message.reply_text(f"🔴 Target range updated to: <b>{clean_text}</b>", parse_mode="HTML")
+            else:
+                await update.message.reply_text("🔴 Invalid range! Please enter a valid number prefix.")
+            return
+        elif state == "WAITING_FOR_BKASH":
+            USER_STATES[user_id] = None
+            USER_WITHDRAW_INFO[user_id] = f"bKash: {text.strip()}"
+            await update.message.reply_text(f"✅ bKash number saved: <code>{text.strip()}</code>", parse_mode="HTML")
+            return
+        elif state == "WAITING_FOR_BINANCE":
+            USER_STATES[user_id] = None
+            USER_WITHDRAW_INFO[user_id] = f"Binance ID: {text.strip()}"
+            await update.message.reply_text(f"✅ Binance ID saved: <code>{text.strip()}</code>", parse_mode="HTML")
+            return
 
-            if len(text) < 3:
+        if "Get API Number" in text:
+            USER_STATES[user_id] = None
+            wait_msg = await update.message.reply_text("⏳ Fetching real number from MINO panel...")
+            user_range = USER_RANGES.get(user_id, "23762XXX")
+            
+            phone, _ = await get_mino_real_number(target_range=user_range)
+            try: await wait_msg.delete()
+            except: pass
 
-                await update.message.reply_text(
-                    "❌ Invalid range.\n"
-                    "উদাহরণ: <code>23762XXX</code>",
-                    parse_mode="HTML"
-                )
-
+            if not phone:
+                await update.message.reply_text(f"❌ No stock available for range <code>{user_range}</code>.", parse_mode="HTML")
                 return
 
-            USER_RANGES[user_id] = text.upper()
-            USER_STATES[user_id] = None
+            ACTIVE_USER_NUMBERS[user_id] = {
+                "phone": phone,
+                "chat_id": update.effective_chat.id,
+                "sent_otps": set()
+            }
 
-            await update.message.reply_text(
-                f"✅ <b>Range Updated</b>\n\n"
-                f"New Range: <code>{text.upper()}</code>",
-                parse_mode="HTML"
-            )
+            country_name, _, flag = get_country_info(phone)
+            header_text = f"✅ <b>Number:</b> {flag} {country_name}\n\nEkhon ei number-ti te OTP pathale sathe sathe apnake real code ekhane pathiye dewa hobe!"
+            reply_markup = create_single_number_markup(phone)
+            await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
 
-            return
-
-        # ---------------------------------------------
-        # BKASH
-        # ---------------------------------------------
-
-        if state == "WAITING_FOR_BKASH":
-
-            USER_WITHDRAW_INFO[user_id] = (
-                f"bKash: {text}"
-            )
-
-            USER_STATES[user_id] = None
-
-            await update.message.reply_text(
-                f"✅ bKash information saved:\n"
-                f"<code>{text}</code>",
-                parse_mode="HTML"
-            )
-
-            return
-
-        # ---------------------------------------------
-        # BINANCE
-        # ---------------------------------------------
-
-        if state == "WAITING_FOR_BINANCE":
-
-            USER_WITHDRAW_INFO[user_id] = (
-                f"Binance ID: {text}"
-            )
-
-            USER_STATES[user_id] = None
-
-            await update.message.reply_text(
-                f"✅ Binance information saved:\n"
-                f"<code>{text}</code>",
-                parse_mode="HTML"
-            )
-
-            return
-
-        # ---------------------------------------------
-        # GET NUMBER
-        # ---------------------------------------------
-
-        if text == "📞 Get API Number":
-
-            USER_STATES[user_id] = None
-
-            await handle_get_number(
-                update,
-                user_id
-            )
-
-            return
-
-        # ---------------------------------------------
-        # SET RANGE
-        # ---------------------------------------------
-
-        if text == "⚙ Set Range":
-
+        elif "Set Range" in text:
             USER_STATES[user_id] = "WAITING_FOR_RANGE"
+            await update.message.reply_text("🔴 Please send your target number range (e.g. 23762XXX):")
 
-            current_range = USER_RANGES.get(
-                user_id,
-                DEFAULT_RANGE
-            )
-
-            await update.message.reply_text(
-                "⚙️ <b>Set Number Range</b>\n\n"
-                f"বর্তমান range: <code>{current_range}</code>\n\n"
-                "নতুন range পাঠান।\n"
-                "উদাহরণ: <code>23762XXX</code>",
-                parse_mode="HTML"
-            )
-
-            return
-
-        # ---------------------------------------------
-        # LIVE TRAFFIC
-        # ---------------------------------------------
-
-        if text == "🟢 Live Traffic":
-
+        elif "Live Traffic" in text or "TRAFFIC" in text:
             USER_STATES[user_id] = None
-
-            hits, total = await fetch_live_traffic()
-
-            if not hits:
-
-                await update.message.reply_text(
-                    "⚠️ বর্তমানে কোনো traffic পাওয়া যায়নি।"
-                )
-
-                return
-
-            service_data = build_traffic_data(hits)
-
+            service_data, total_hits = await fetch_live_traffic_detailed()
+            
             if not service_data:
-
-                await update.message.reply_text(
-                    "⚠️ Traffic data পাওয়া গেছে, "
-                    "কিন্তু display করার মতো range নেই।"
-                )
-
+                await update.message.reply_text("⚠ No active traffic found right now.", parse_mode="HTML")
                 return
 
             keyboard = []
-
-            for service in sorted(service_data):
-
-                total_service = 0
-
-                for country_data in service_data[service].values():
-
-                    total_service += sum(
-                        country_data["ranges"].values()
-                    )
-
-                keyboard.append([
-                    InlineKeyboardButton(
-                        f"👀 {service.title()} ({total_service})",
-                        callback_data=f"tr_svc_{service[:30]}"
-                    )
-                ])
-
-            keyboard.append([
-                InlineKeyboardButton(
-                    "🔄 Refresh",
-                    callback_data="tr_refresh"
-                ),
-                InlineKeyboardButton(
-                    "❌ Close",
-                    callback_data="tr_close"
-                )
-            ])
-
+            for sid in sorted(service_data.keys()):
+                total_sid_otp = sum(sum(c_info["ranges"].values()) for c_info in service_data[sid].values())
+                keyboard.append([InlineKeyboardButton(f"👀 Explore {sid.title()} Range ({total_sid_otp})", callback_data=f"tr_svc_{sid}")])
+            
+            keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data="tr_refresh"), InlineKeyboardButton("❌ Close", callback_data="tr_close")])
             markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(f"📊 <b>Live Traffic Panel</b>\n📋 <b>Total OTP:</b> {total_hits}\nSelect a service below:", reply_markup=markup, parse_mode="HTML")
 
-            await update.message.reply_text(
-                f"📊 <b>Live Traffic</b>\n\n"
-                f"📋 Total records: <b>{total}</b>\n\n"
-                "একটি service নির্বাচন করুন:",
-                reply_markup=markup,
-                parse_mode="HTML"
-            )
-
-            return
-
-        # ---------------------------------------------
-        # BALANCE
-        # ---------------------------------------------
-
-        if text == "💳 Balance":
-
+        elif "Balance" in text:
             USER_STATES[user_id] = None
-
-            balance = USER_BALANCES.get(
-                user_id,
-                0.0
-            )
-
-            payout = USER_WITHDRAW_INFO.get(
-                user_id,
-                "Not Set"
-            )
-
-            markup = InlineKeyboardMarkup([
-
-                [
-                    InlineKeyboardButton(
-                        "💸 Withdraw",
-                        callback_data="withdraw_menu"
-                    )
-                ],
-
-                [
-                    InlineKeyboardButton(
-                        "📱 Set bKash",
-                        callback_data="set_bkash"
-                    ),
-
-                    InlineKeyboardButton(
-                        "🔴 Set Binance",
-                        callback_data="set_binance"
-                    )
-                ]
-
+            user_bal = USER_BALANCES.get(user_id, 0.0)
+            saved_info = USER_WITHDRAW_INFO.get(user_id, "Not Set")
+            balance_markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("💸 Withdraw", callback_data="withdraw_menu")],
+                [InlineKeyboardButton("📱 Set bKash", callback_data="set_bkash"), InlineKeyboardButton("🔴 Set Binance", callback_data="set_binance")]
             ])
+            await update.message.reply_text(f"💳 <b>Balance:</b> ${user_bal:.5f}\n📂 <b>Payout Info:</b> {saved_info}", reply_markup=balance_markup, parse_mode="HTML")
 
-            await update.message.reply_text(
-                f"💳 <b>Your Balance</b>\n\n"
-                f"💰 Balance: <code>${balance:.5f}</code>\n"
-                f"📂 Payout: <code>{payout}</code>",
-                reply_markup=markup,
-                parse_mode="HTML"
-            )
-
-            return
-
-        # ---------------------------------------------
-        # SUPPORT
-        # ---------------------------------------------
-
-        if text == "💬 Support":
-
-            await help_command(
-                update,
-                context
-            )
-
-            return
-
-        # ---------------------------------------------
-        # OTP GROUP
-        # ---------------------------------------------
-
-        if text == "📣 OTP Group":
-
-            markup = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "📣 Join Group",
-                        url=f"https://t.me/{YOUR_TELEGRAM_USERNAME}"
-                    )
-                ]
-            ])
-
-            await update.message.reply_text(
-                "📣 Group link:",
-                reply_markup=markup
-            )
-
-            return
-
+        elif "Support" in text: await help_command(update, context)
+        elif "OTP Group" in text:
+            group_markup = InlineKeyboardMarkup([[InlineKeyboardButton("📣 Join OTP Group", url=f"https://t.me/{YOUR_TELEGRAM_USERNAME}")]])
+            await update.message.reply_text("📣 Join official OTP group:", reply_markup=group_markup)
     except Exception as e:
-
-        print(
-            "MESSAGE HANDLER ERROR:",
-            repr(e)
-        )
-
-        try:
-            await update.message.reply_text(
-                "❌ একটি technical error হয়েছে। "
-                "কিছুক্ষণ পরে আবার চেষ্টা করুন।"
-            )
-        except Exception:
-            pass
-
-
-# =========================================================
-# CALLBACK HANDLER
-# =========================================================
+        print(f"Message Handler Error: {e}")
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    query = update.callback_query
-
-    await query.answer()
-
-    user_id = query.from_user.id
-    data = query.data
-
     try:
-
-        # ---------------------------------------------
-        # BACK HOME
-        # ---------------------------------------------
+        query = update.callback_query
+        data = query.data
+        user_id = query.from_user.id
 
         if data == "back_home":
+            try: await query.message.delete()
+            except: pass
+            await start(update, context)
 
+        elif data == "change_number":
+            await query.answer("🔄 Fetching new number...")
+            user_range = USER_RANGES.get(user_id, "23762XXX")
+            phone, _ = await get_mino_real_number(target_range=user_range)
+            
+            if not phone:
+                await query.answer(f"❌ No stock available for range {user_range}.", show_alert=True)
+                return
+
+            ACTIVE_USER_NUMBERS[user_id] = {
+                "phone": phone,
+                "chat_id": query.message.chat_id,
+                "sent_otps": set()
+            }
+
+            country_name, _, flag = get_country_info(phone)
+            header_text = f"✅ <b>New Number:</b> {flag} {country_name}"
+            reply_markup = create_single_number_markup(phone)
             try:
-                await query.message.delete()
-            except Exception:
-                pass
+                await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
+            except:
+                await query.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
 
-            keyboard = [
-                ["📞 Get API Number", "⚙ Set Range"],
-                ["🟢 Live Traffic",
+        elif data.startswith("tr_svc_"):
+            await query.answer()
+            sid = data.replace("tr_svc_", "")
+            service_data, _ = await fetch_live_traffic_detailed()
+            if sid not in service_data:
+                await query.answer("⚠️ No data available!", show_alert=True)
+                return
+            
+            countries = service_data[sid]
+            keyboard = []
+            for c_code, c_info in sorted(countries.items(), key=lambda x: sum(x[1]["ranges"].values()), reverse=True):
+                c_otp_count = sum(c_info["ranges"].values())
+                keyboard.append([InlineKeyboardButton(f"{c_info['flag']} {c_info['name']} ({c_code}) - {c_otp_count} OTP", callback_data=f"tr_cnt_{sid}_{c_code}")])
+            
+            keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="tr_main")])
+            markup = InlineKeyboardMarkup(keyboard)
+            try: await query.edit_message_text(f"👑 <b>Explore Service:</b> 🌐 {sid}\n\nSelect a country:", reply_markup=markup, parse_mode="HTML")
+            except: pass
+
+        elif data.startswith("tr_cnt_"):
+            await query.answer()
+            parts = data.split("_")
+            sid = parts[2]
+            c_code = parts[3]
+            service_data, _ = await fetch_live_traffic_detailed()
+            if sid not in service_data or c_code not in service_data[sid]: return
+            
+            c_data = service_data[sid][c_code]
+            ranges = c_data["ranges"]
+            
+            keyboard = []
+            row = []
+            for r_num, count in sorted(ranges.items(), key=lambda x: x[1], reverse=True):
+                row.append(InlineKeyboardButton(f"🎛 {r_num} ({count})", copy_text=CopyTextButton(text=r_num)))
+                if len(row) == 2:
+                    keyboard.append(row)
+                    row = []
+            if row: keyboard.append(row)
+            
+            keyboard.append([InlineKeyboardButton("🔙 Back", callback_data=f"tr_svc_{sid}")])
+            markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await query.edit_message_text(f"👑 <b>Ranges for</b> 🌐 {sid} - {c_data['flag']} <b>{c_code}</b>\n\nClick range to copy:", reply_markup=markup, parse_mode="HTML")
+            except: pass
+
+        elif data == "tr_main" or data == "tr_refresh":
+            await query.answer("🔄 Refreshed!")
+            service_data, total_hits = await fetch_live_traffic_detailed()
+            keyboard = []
+            for sid in sorted(service_data.keys()):
+                total_sid_otp = sum(sum(c_info["ranges"].values()) for c_info in service_data[sid].values())
+                keyboard.append([InlineKeyboardButton(f"👀 Explore {sid.title()} Range ({total_sid_otp})", callback_data=f"tr_svc_{sid}")])
+            keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data="tr_refresh"), InlineKeyboardButton("❌ Close", callback_data="tr_close")])
+            markup = InlineKeyboardMarkup(keyboard)
+            try: await query.edit_message_text(f"📊 <b>Live Traffic Panel</b>\n📋 <b>Total OTP:</b> {total_hits}\nSelect a service:", reply_markup=markup, parse_mode="HTML")
+            except: pass
+
+        elif data == "tr_close":
+            try: await query.message.delete()
+            except: pass
+
+        elif data == "set_bkash":
+            USER_STATES[user_id] = "WAITING_FOR_BKASH"
+            await query.message.reply_text("📲 Please send your bKash number:")
+        elif data == "set_binance":
+            USER_STATES[user_id] = "WAITING_FOR_BINANCE"
+            await query.message.reply_text("🔴 Please send your Binance ID:")
+        elif data == "withdraw_menu":
+            user_bal = USER_BALANCES.get(user_id, 0.0)
+            if user_bal < 1.0:
+                await query.message.reply_text(f"❌ Minimum withdraw is $1.00. Current: ${user_bal:.5f}")
+            else:
+                await query.message.reply_text("✅ Withdraw request submitted successfully.")
+                USER_BALANCES[user_id] = 0.0
+    except Exception as e:
+        print(f"Callback Error: {e}")
+
+async def post_init(application):
+    application.create_task(auto_forward_console_logs(application))
+
+if __name__ == '__main__':
+    app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
+    app.add_handler(CommandHandler('start', start))
+    app.add_handler(CommandHandler('help', help_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CallbackQueryHandler(handle_callback))
+
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    import threading
+
+    class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+        do_HEAD = lambda s: s.do_GET()
+        def do_GET(self, *a):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Bot is running!")
+
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    app.run_polling()
