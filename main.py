@@ -64,20 +64,6 @@ def _sync_get_mino_real_number(target_range):
 async def get_mino_real_number(target_range="23762XXX"):
     return await asyncio.to_thread(_sync_get_mino_real_number, target_range)
 
-def _sync_check_number_sms(phone_number):
-    headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
-    clean_num = str(phone_number).replace("+", "").strip()
-    try:
-        res = requests.get(f"{BASE_API_URL}/check.php?api_key={MINO_API_KEY}&number={clean_num}", headers=headers, timeout=4.0)
-        if res.status_code == 200:
-            return res.json()
-    except Exception as e:
-        print(f"Check SMS API Error: {e}")
-    return None
-
-async def check_number_sms(phone_number):
-    return await asyncio.to_thread(_sync_check_number_sms, phone_number)
-
 def _sync_success_otp(phone_number):
     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
     clean_num = str(phone_number).strip()
@@ -132,84 +118,7 @@ async def auto_forward_console_logs(application):
         try:
             headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
             
-            # ১. একটিভ ইউজারের নিজস্ব নাম্বারের জন্য check.php থেকে কোড ফেচ করা
-            for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
-                u_phone = str(u_info.get("phone", "")).strip()
-                if not u_phone: continue
-
-                check_res = await check_number_sms(u_phone)
-                messages = []
-                
-                if check_res:
-                    if isinstance(check_res, dict):
-                        data_field = check_res.get("data") or check_res.get("messages") or check_res.get("sms") or check_res.get("message")
-                        if isinstance(data_field, list):
-                            messages = data_field
-                        elif isinstance(data_field, dict):
-                            messages = [data_field]
-                        elif isinstance(data_field, str) and data_field:
-                            messages = [{"message": data_field}]
-                        
-                        if not messages:
-                            for k, v in check_res.items():
-                                if isinstance(v, (str, list, dict)):
-                                    messages.append(v)
-                    elif isinstance(check_res, list):
-                        messages = check_res
-
-                for msg_item in messages:
-                    msg = ""
-                    service = "SMS"
-                    country = "International"
-
-                    if isinstance(msg_item, str):
-                        msg = msg_item
-                    elif isinstance(msg_item, dict):
-                        msg = msg_item.get("message") or msg_item.get("text") or msg_item.get("sms") or msg_item.get("content") or msg_item.get("msg") or msg_item.get("code") or ""
-                        service = msg_item.get("service", "SMS")
-                        country = msg_item.get("country", "International")
-
-                    if not msg: continue
-
-                    log_id = f"{u_phone}_{msg}"
-                    if log_id in SEEN_OTP_IDS: continue
-                    SEEN_OTP_IDS.add(log_id)
-
-                    match_otp = re.search(r'\b\d{4,8}\b', str(msg))
-                    otp_code = match_otp.group(0) if match_otp else str(msg)
-                    
-                    sent_set = u_info.setdefault("sent_otps", set())
-                    if otp_code not in sent_set:
-                        sent_set.add(otp_code)
-                        current_bal = USER_BALANCES.get(user_id, 0.0)
-                        USER_BALANCES[user_id] = current_bal + 0.00122
-                        
-                        _, _, flag = get_country_info(u_phone, country)
-                        personal_text = (
-                            f"🟢 <b>SUCCESSFUL OTP RECEIVED</b>\n\n"
-                            f"🌐 <b>Service :</b> {service}\n"
-                            f"🌍 <b>Country :</b> {country} ({flag})\n"
-                            f"🎯 <b>Number :</b> <code>{u_phone}</code>\n"
-                            f"🔑 <b>OTP Code :</b> <code>{otp_code}</code>\n\n"
-                            f"✉ <b>Full Message :</b>\n<code>{msg}</code>\n\n"
-                            f"💰 <b>Earned :</b> +$0.00122"
-                        )
-                        personal_markup = InlineKeyboardMarkup([
-                            [InlineKeyboardButton(text=f"📋 Copy OTP: {otp_code}", copy_text=CopyTextButton(text=otp_code))],
-                            [InlineKeyboardButton("🔄 Change Number", callback_data="change_number")]
-                        ])
-                        try:
-                            await application.bot.send_message(
-                                chat_id=u_info["chat_id"], 
-                                text=personal_text, 
-                                reply_markup=personal_markup,
-                                parse_mode="HTML"
-                            )
-                            await success_otp(u_phone)
-                        except Exception as per_ex:
-                            print(f"Personal Send Error: {per_ex}")
-
-            # ২. গ্লোবাল কনসোল থেকে লুপ চালিয়ে ফরোয়ার্ড করা
+            # গ্লোবাল কনসোল স্ট্রিম চেক করা
             res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=4.0)
             if res.status_code == 200:
                 res_json = res.json()
@@ -223,14 +132,55 @@ async def auto_forward_console_logs(application):
                         country = hit.get("country", "International")
 
                         if not msg: continue
+                        if str(msg).lower().strip() in ["success", "completed", "waiting", "failed"]:
+                            continue
+
                         g_id = f"g_{num}_{msg}"
                         if g_id in SEEN_OTP_IDS: continue
                         SEEN_OTP_IDS.add(g_id)
 
                         match_otp_g = re.search(r'\b\d{4,8}\b', str(msg))
-                        otp_code_g = match_otp_g.group(0) if match_otp_g else str(msg)
+                        if not match_otp_g: continue
+                        otp_code_g = match_otp_g.group(0)
 
                         _, _, flag = get_country_info(num, country)
+
+                        # ১. কনসোলের নাম্বারটি কোনো ইউজারের একটিভ নাম্বারের সাথে মিলে কি না চেক করা এবং মিললে তার বটে পাঠানো
+                        clean_console_num = num.replace("+", "").strip()
+                        for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
+                            u_phone = str(u_info.get("phone", "")).replace("+", "").strip()
+                            if u_phone and (u_phone == clean_console_num or clean_console_num.endswith(u_phone) or u_phone.endswith(clean_console_num)):
+                                sent_set = u_info.setdefault("sent_otps", set())
+                                if otp_code_g not in sent_set:
+                                    sent_set.add(otp_code_g)
+                                    current_bal = USER_BALANCES.get(user_id, 0.0)
+                                    USER_BALANCES[user_id] = current_bal + 0.00122
+
+                                    personal_text = (
+                                        f"🟢 <b>SUCCESSFUL OTP RECEIVED</b>\n\n"
+                                        f"🌐 <b>Service :</b> {service}\n"
+                                        f"🌍 <b>Country :</b> {country} ({flag})\n"
+                                        f"🎯 <b>Number :</b> <code>{num}</code>\n"
+                                        f"🔑 <b>OTP Code :</b> <code>{otp_code_g}</code>\n\n"
+                                        f"✉ <b>Full Message :</b>\n<code>{msg}</code>\n\n"
+                                        f"💰 <b>Earned :</b> +$0.00122"
+                                    )
+                                    personal_markup = InlineKeyboardMarkup([
+                                        [InlineKeyboardButton(text=f"📋 Copy OTP: {otp_code_g}", copy_text=CopyTextButton(text=otp_code_g))],
+                                        [InlineKeyboardButton("🔄 Change Number", callback_data="change_number")]
+                                    ])
+                                    try:
+                                        await application.bot.send_message(
+                                            chat_id=u_info["chat_id"], 
+                                            text=personal_text, 
+                                            reply_markup=personal_markup,
+                                            parse_mode="HTML"
+                                        )
+                                        await success_otp(num)
+                                    except Exception as per_ex:
+                                        print(f"Personal Send Error: {per_ex}")
+
+                        # ২. গ্লোবাল গ্রুপেও ওটিপি ফরোয়ার্ড করা
                         group_text = (
                             f"🟢 <b>{service} OTP RECEIVED</b>\n\n"
                             f"🌍 <b>Country :</b> {country} ({flag})\n"
