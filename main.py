@@ -41,7 +41,7 @@ def get_country_info(phone_number, api_country=""):
     elif clean_num.startswith("261"): return "Madagascar", "MG", "🇲🇬"
     else: return "International", "INT", "🌍"
 
-def _sync_get_mino_real_number(target_range):
+def get_mino_real_number_sync(target_range):
     headers = {
         "mauthapi": MINO_API_KEY,
         "Accept": "application/json",
@@ -62,9 +62,9 @@ def _sync_get_mino_real_number(target_range):
     return None, None
 
 async def get_mino_real_number(target_range="23762XXX"):
-    return await asyncio.to_thread(_sync_get_mino_real_number, target_range)
+    return await asyncio.to_thread(get_mino_real_number_sync, target_range)
 
-def _sync_success_otp(phone_number):
+def success_otp_sync(phone_number):
     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
     clean_num = str(phone_number).strip()
     try:
@@ -73,9 +73,9 @@ def _sync_success_otp(phone_number):
         pass
 
 async def success_otp(phone_number):
-    await asyncio.to_thread(_sync_success_otp, phone_number)
+    await asyncio.to_thread(success_otp_sync, phone_number)
 
-def _sync_fetch_live_traffic_detailed():
+def fetch_live_traffic_detailed_sync():
     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
     service_data = {}
     total_hits = 0
@@ -111,7 +111,7 @@ def _sync_fetch_live_traffic_detailed():
     return service_data, total_hits
 
 async def fetch_live_traffic_detailed():
-    return await asyncio.to_thread(_sync_fetch_live_traffic_detailed)
+    return await asyncio.to_thread(fetch_live_traffic_detailed_sync)
 
 async def auto_forward_console_logs(application):
     print("Background Console Stream Listener Started Successfully!")
@@ -148,7 +148,6 @@ async def auto_forward_console_logs(application):
 
                         _, _, flag = get_country_info(num, country)
                         
-                        # নাম্বারের শুধু ডিজিটগুলো নিয়ে শেষ ৯ ডিজিট মেলানোর ব্যবস্থা
                         clean_console_num = re.sub(r'\D', '', num)
                         
                         for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
@@ -163,7 +162,6 @@ async def auto_forward_console_logs(application):
                                 u_suffix = u_clean[-9:] if len(u_clean) >= 9 else u_clean
                                 c_suffix = clean_console_num[-9:] if len(clean_console_num) >= 9 else clean_console_num
                                 
-                                # শেষ ৯ ডিজিট মিলে গেলেই ওটিপি চলে যাবে
                                 if u_suffix and c_suffix and (u_suffix == c_suffix):
                                     sent_set = u_info.setdefault("sent_otps", set())
                                     if otp_code_g not in sent_set:
@@ -457,11 +455,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Callback Error: {e}")
 
-async def on_startup(application):
-    asyncio.create_task(auto_forward_console_logs(application))
+async def post_init(application):
+    application.create_task(auto_forward_console_logs(application))
 
 if __name__ == '__main__':
-    app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('help', help_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
@@ -481,5 +479,4 @@ if __name__ == '__main__':
     server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
-    # আগের সব conflicting গেট-আপডেট সেশন ড্রপ করে নতুন করে বট সচল করবে
     app.run_polling(drop_pending_updates=True)
