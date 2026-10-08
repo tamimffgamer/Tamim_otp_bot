@@ -136,9 +136,11 @@ async def auto_forward_console_logs(application):
                         if str(msg).lower().strip() in ["success", "completed", "waiting", "failed"]:
                             continue
 
-                        g_id = f"g_{num}_{msg}"
+                        g_id = f"g_{num}_{msg}_{time.time()}"
                         if g_id in SEEN_OTP_IDS: continue
                         SEEN_OTP_IDS.add(g_id)
+                        if len(SEEN_OTP_IDS) > 500:
+                            SEEN_OTP_IDS.clear()
 
                         match_otp_g = re.search(r'\b\d{4,8}\b', str(msg))
                         if not match_otp_g: continue
@@ -147,18 +149,16 @@ async def auto_forward_console_logs(application):
                         _, _, flag = get_country_info(num, country)
                         clean_console_num = num.replace("+", "").strip()
                         
-                        # শুধুমাত্র নির্দিষ্ট ইউজারের জন্য সঠিক ফুল নাম্বার এবং ২০ মিনিটের ভেতরের কোড চেক করা
+                        # ইউজারের নাম্বার এবং কনসোল নাম্বারের নিখুঁত মিল চেক করা
                         for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                             u_phone = str(u_info.get("phone", "")).replace("+", "").strip()
                             fetch_time = u_info.get("fetch_time", 0)
                             
-                            # ২০ মিনিট (১২০০ সেকেন্ড) পার হয়ে গেলে বাদ
                             if (current_time - fetch_time) > 1200:
                                 continue
 
-                            # ফেক কোড রোধ করতে প্রিফিক্স বা ছোট রেঞ্জ বাদ দিয়ে হুবহু ফুল নাম্বার ম্যাচিং নিশ্চিত করা হলো
-                            if u_phone and len(clean_console_num) >= 8:
-                                if clean_console_num == u_phone or clean_console_num.endswith(u_phone) or u_phone.endswith(clean_console_num):
+                            if u_phone and clean_console_num:
+                                if clean_console_num == u_phone or clean_console_num in u_phone or u_phone in clean_console_num:
                                     sent_set = u_info.setdefault("sent_otps", set())
                                     if otp_code_g not in sent_set:
                                         sent_set.add(otp_code_g)
@@ -189,7 +189,6 @@ async def auto_forward_console_logs(application):
                                         except Exception as per_ex:
                                             print(f"Personal Send Error: {per_ex}")
 
-                        # গ্লোবাল গ্রুপে পাঠানোর অংশ (এটি চাইলে রাখতে পারেন)
                         group_text = (
                             f"🟢 <b>{service} OTP RECEIVED</b>\n\n"
                             f"🌍 <b>Country :</b> {country} ({flag})\n"
@@ -214,7 +213,7 @@ async def auto_forward_console_logs(application):
 
         except Exception as e:
             print(f"Background Loop Error: {e}")
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
 
 def create_single_number_markup(phone_num):
     _, _, flag = get_country_info(phone_num)
@@ -472,7 +471,7 @@ if __name__ == '__main__':
             self.end_headers()
             self.wfile.write(b"Bot is running!")
 
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
