@@ -50,7 +50,7 @@ def _sync_get_mino_real_number(target_range):
     clean_rid = str(target_range).upper().strip()
     payload = {"rid": clean_rid}
     try:
-        res = requests.post(f"{BASE_API_URL}/getnumber.php", headers=headers, json=payload, timeout=5.0)
+        res = requests.post(f"{BASE_API_URL}/getnumber.php", headers=headers, json=payload, timeout=10.0)
         if res.status_code == 200:
             res_data = res.json()
             data = res_data.get("data", {})
@@ -68,7 +68,7 @@ def _sync_success_otp(phone_number):
     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
     clean_num = str(phone_number).strip()
     try:
-        requests.get(f"{BASE_API_URL}/success_otp.php?api_key={MINO_API_KEY}&number={clean_num}", headers=headers, timeout=3.0)
+        requests.get(f"{BASE_API_URL}/success_otp.php?api_key={MINO_API_KEY}&number={clean_num}", headers=headers, timeout=5.0)
     except:
         pass
 
@@ -80,7 +80,7 @@ def _sync_fetch_live_traffic_detailed():
     service_data = {}
     total_hits = 0
     try:
-        res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=5.0)
+        res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=10.0)
         if res.status_code == 200:
             res_json = res.json()
             hits = res_json.get("data", [])
@@ -114,12 +114,12 @@ async def fetch_live_traffic_detailed():
     return await asyncio.to_thread(_sync_fetch_live_traffic_detailed)
 
 async def auto_forward_console_logs(application):
+    print("Background Console Stream Listener Started Successfully!")
     while True:
         try:
             headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
             
-            # প্যানেলের কনসোল স্ট্রিম থেকে লাইভ ডাটা চেক করা
-            res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=4.0)
+            res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=6.0)
             if res.status_code == 200:
                 res_json = res.json()
                 hits = res_json.get("data", [])
@@ -132,7 +132,6 @@ async def auto_forward_console_logs(application):
                         country = hit.get("country", "International")
 
                         if not msg: continue
-                        # ভুয়া স্ট্যাটাস টেক্সট ফিল্টার করে বাদ দেওয়া
                         if str(msg).lower().strip() in ["success", "completed", "waiting", "failed"]:
                             continue
 
@@ -146,7 +145,6 @@ async def auto_forward_console_logs(application):
 
                         _, _, flag = get_country_info(num, country)
 
-                        # ১. বট থেকে নেওয়া ইউজারের নাম্বারের সাথে কনসোলের নাম্বারের নিখুঁত মিল (Exact & Suffix Match) চেক করা
                         clean_console_num = num.replace("+", "").strip()
                         for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                             u_phone = str(u_info.get("phone", "")).replace("+", "").strip()
@@ -181,7 +179,6 @@ async def auto_forward_console_logs(application):
                                     except Exception as per_ex:
                                         print(f"Personal Send Error: {per_ex}")
 
-                        # ২. গ্লোবাল বা পাবলিক ওটিপি গ্রুপে ফরোয়ার্ড করা
                         group_text = (
                             f"🟢 <b>{service} OTP RECEIVED</b>\n\n"
                             f"🌍 <b>Country :</b> {country} ({flag})\n"
@@ -201,10 +198,12 @@ async def auto_forward_console_logs(application):
                                 parse_mode="HTML"
                             )
                         except: pass
+            else:
+                print(f"Console API Status Code: {res.status_code}")
 
         except Exception as e:
             print(f"Background Loop Error: {e}")
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
 
 def create_single_number_markup(phone_num):
     _, _, flag = get_country_info(phone_num)
