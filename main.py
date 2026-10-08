@@ -147,50 +147,49 @@ async def auto_forward_console_logs(application):
                         _, _, flag = get_country_info(num, country)
                         clean_console_num = num.replace("+", "").strip()
                         
-                        # শুধুমাত্র নির্দিষ্ট ইউজারের জন্য ২০ মিনিটের মধ্যে আসা কোড ফিল্টার করা
+                        # শুধুমাত্র নির্দিষ্ট ইউজারের জন্য সঠিক ফুল নাম্বার এবং ২০ মিনিটের ভেতরের কোড চেক করা
                         for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                             u_phone = str(u_info.get("phone", "")).replace("+", "").strip()
                             fetch_time = u_info.get("fetch_time", 0)
                             
-                            # নাম্বার নেওয়ার সময় থেকে বর্তমান সময়ের পার্থক্য (সেকেন্ডে)
-                            time_diff = current_time - fetch_time
-                            
-                            # যদি ২০ মিনিট (১২০০ সেকেন্ড) পার হয়ে যায়, তবে এই নাম্বারের একটিভ সেশন বাদ দিয়ে দেব
-                            if time_diff > 1200:
+                            # ২০ মিনিট (১২০০ সেকেন্ড) পার হয়ে গেলে বাদ
+                            if (current_time - fetch_time) > 1200:
                                 continue
 
-                            if u_phone and (u_phone in clean_console_num or clean_console_num in u_phone or u_phone == clean_console_num):
-                                sent_set = u_info.setdefault("sent_otps", set())
-                                if otp_code_g not in sent_set:
-                                    sent_set.add(otp_code_g)
-                                    current_bal = USER_BALANCES.get(user_id, 0.0)
-                                    USER_BALANCES[user_id] = current_bal + 0.00122
+                            # ফেক কোড রোধ করতে প্রিফিক্স বা ছোট রেঞ্জ বাদ দিয়ে হুবহু ফুল নাম্বার ম্যাচিং নিশ্চিত করা হলো
+                            if u_phone and len(clean_console_num) >= 8:
+                                if clean_console_num == u_phone or clean_console_num.endswith(u_phone) or u_phone.endswith(clean_console_num):
+                                    sent_set = u_info.setdefault("sent_otps", set())
+                                    if otp_code_g not in sent_set:
+                                        sent_set.add(otp_code_g)
+                                        current_bal = USER_BALANCES.get(user_id, 0.0)
+                                        USER_BALANCES[user_id] = current_bal + 0.00122
 
-                                    personal_text = (
-                                        f"🟢 <b>SUCCESSFUL OTP RECEIVED</b>\n\n"
-                                        f"🌐 <b>Service :</b> {service}\n"
-                                        f"🌍 <b>Country :</b> {country} ({flag})\n"
-                                        f"🎯 <b>Number :</b> <code>{num}</code>\n"
-                                        f"🔑 <b>OTP Code :</b> <code>{otp_code_g}</code>\n\n"
-                                        f"✉ <b>Full Message :</b>\n<code>{msg}</code>\n\n"
-                                        f"💰 <b>Earned :</b> +$0.00122"
-                                    )
-                                    personal_markup = InlineKeyboardMarkup([
-                                        [InlineKeyboardButton(text=f"📋 Copy OTP: {otp_code_g}", copy_text=CopyTextButton(text=otp_code_g))],
-                                        [InlineKeyboardButton("🔄 Change Number", callback_data="change_number")]
-                                    ])
-                                    try:
-                                        await application.bot.send_message(
-                                            chat_id=u_info["chat_id"], 
-                                            text=personal_text, 
-                                            reply_markup=personal_markup,
-                                            parse_mode="HTML"
+                                        personal_text = (
+                                            f"🟢 <b>SUCCESSFUL OTP RECEIVED</b>\n\n"
+                                            f"🌐 <b>Service :</b> {service}\n"
+                                            f"🌍 <b>Country :</b> {country} ({flag})\n"
+                                            f"🎯 <b>Number :</b> <code>{num}</code>\n"
+                                            f"🔑 <b>OTP Code :</b> <code>{otp_code_g}</code>\n\n"
+                                            f"✉ <b>Full Message :</b>\n<code>{msg}</code>\n\n"
+                                            f"💰 <b>Earned :</b> +$0.00122"
                                         )
-                                        await success_otp(num)
-                                    except Exception as per_ex:
-                                        print(f"Personal Send Error: {per_ex}")
+                                        personal_markup = InlineKeyboardMarkup([
+                                            [InlineKeyboardButton(text=f"📋 Copy OTP: {otp_code_g}", copy_text=CopyTextButton(text=otp_code_g))],
+                                            [InlineKeyboardButton("🔄 Change Number", callback_data="change_number")]
+                                        ])
+                                        try:
+                                            await application.bot.send_message(
+                                                chat_id=u_info["chat_id"], 
+                                                text=personal_text, 
+                                                reply_markup=personal_markup,
+                                                parse_mode="HTML"
+                                            )
+                                            await success_otp(num)
+                                        except Exception as per_ex:
+                                            print(f"Personal Send Error: {per_ex}")
 
-                        # গ্লোবাল গ্রুপে পাঠানোর লজিক (এটি চাইলে রাখতে পারেন অথবা বন্ধ করতে পারেন)
+                        # গ্লোবাল গ্রুপে পাঠানোর অংশ (এটি চাইলে রাখতে পারেন)
                         group_text = (
                             f"🟢 <b>{service} OTP RECEIVED</b>\n\n"
                             f"🌍 <b>Country :</b> {country} ({flag})\n"
