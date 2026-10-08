@@ -28,7 +28,7 @@ def get_country_info(phone_number, api_country=""):
         if "madagascar" in c_lower: return "Madagascar", "MG", "🇲🇬"
         elif "ivory" in c_lower or "côte" in c_lower: return "Ivory Coast", "CI", "🇨🇮"
         elif "cameroon" in c_lower: return "Cameroon", "CM", "🇨🇲"
-        elif "togo" in c_lower: return "Togo", "TG", "TG"
+        elif "togo" in c_lower: return "Togo", "TG", "🇹🇬"
         elif "benin" in c_lower: return "Benin", "BJ", "🇧🇯"
         elif "tanzania" in c_lower: return "Tanzania", "TZ", "🇹🇿"
         elif "ukraine" in c_lower: return "Ukraine", "UA", "🇺🇦"
@@ -66,7 +66,7 @@ async def get_mino_real_number(target_range="23762XXX"):
 
 def _sync_check_number_sms(phone_number):
     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
-    clean_num = str(phone_number).strip()
+    clean_num = str(phone_number).replace("+", "").strip()
     try:
         res = requests.get(f"{BASE_API_URL}/check.php?api_key={MINO_API_KEY}&number={clean_num}", headers=headers, timeout=4.0)
         if res.status_code == 200:
@@ -166,7 +166,6 @@ async def auto_forward_console_logs(application):
                                 hit_num = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("range", "")).strip()
                                 clean_hit_num = hit_num.replace("+", "").strip()
                                 
-                                # Smart Safe Match: Match exact or last 8-9 digits to handle country code prefix differences safely
                                 is_matched = False
                                 if clean_hit_num and clean_u_phone:
                                     if clean_hit_num == clean_u_phone:
@@ -215,19 +214,23 @@ async def auto_forward_console_logs(application):
                         USER_BALANCES[user_id] = current_bal + 0.00122
                         
                         personal_text = (
-                            f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
-                            f"🚨 <b>YOUR NUMBER OTP RECEIVE</b>\n\n"
-                            f"📘 <b>Service :</b> {service}\n"
+                            f"🟢 <b>SUCCESSFUL OTP RECEIVED</b>\n\n"
+                            f"🌐 <b>Service :</b> {service}\n"
                             f"🌍 <b>Country :</b> {country} ({flag})\n"
                             f"🎯 <b>Number :</b> <code>{u_phone}</code>\n"
                             f"🔑 <b>OTP Code :</b> <code>{otp_code}</code>\n\n"
                             f"✉ <b>Full Message :</b>\n<code>{msg}</code>\n\n"
-                            f"💰 <b>Earned:</b> +$0.00122"
+                            f"💰 <b>Earned :</b> +$0.00122"
                         )
+                        personal_markup = InlineKeyboardMarkup([
+                            [InlineKeyboardButton(text=f"📋 Copy OTP: {otp_code}", copy_text=CopyTextButton(text=otp_code))],
+                            [InlineKeyboardButton("🔄 Change Number", callback_data="change_number")]
+                        ])
                         try:
                             await application.bot.send_message(
                                 chat_id=u_info["chat_id"], 
                                 text=personal_text, 
+                                reply_markup=personal_markup,
                                 parse_mode="HTML"
                             )
                             await success_otp(u_phone)
@@ -252,16 +255,19 @@ async def auto_forward_console_logs(application):
                         if g_id in SEEN_OTP_IDS or not msg: continue
                         SEEN_OTP_IDS.add(g_id)
 
+                        match_otp_g = re.search(r'\b\d{4,8}\b', msg)
+                        otp_code_g = match_otp_g.group(0) if match_otp_g else msg
+
                         _, _, flag = get_country_info(num, country)
                         group_text = (
-                            f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
-                            f"📘 <b>{service} OTP RECEIVE</b>\n\n"
+                            f"🟢 <b>{service} OTP RECEIVED</b>\n\n"
                             f"🌍 <b>Country :</b> {country} ({flag})\n"
                             f"🎯 <b>Number :</b> <code>{num}</code>\n"
-                            f"🗣 <b>Language :</b> English\n\n"
+                            f"🔑 <b>Code :</b> <code>{otp_code_g}</code>\n\n"
                             f"✉ <b>Message :</b>\n<code>{msg}</code>"
                         )
                         group_markup = InlineKeyboardMarkup([
+                            [InlineKeyboardButton(text=f"📋 Copy OTP: {otp_code_g}", copy_text=CopyTextButton(text=otp_code_g))],
                             [InlineKeyboardButton("NUMBER BOT ↗", url=f"https://t.me/{application.bot.username}")]
                         ])
                         try:
