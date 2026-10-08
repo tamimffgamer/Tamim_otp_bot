@@ -77,7 +77,7 @@ def _sync_fetch_live_traffic_detailed():
                 total_hits = len(hits)
                 for hit in hits:
                     if not isinstance(hit, dict): continue
-                    r = hit.get("range") or hit.get("number") or hit.get("full_number", "")
+                    r = hit.get("range") or hit.get("number") or hit.get("full_number", "") or hit.get("phone", "")
                     sid = str(hit.get("service", "FACEBOOK")).upper().strip()
                     api_country = hit.get("country", "")
                     
@@ -103,7 +103,6 @@ async def fetch_live_traffic_detailed():
     return await asyncio.to_thread(_sync_fetch_live_traffic_detailed)
 
 async def auto_forward_console_logs(application):
-    # বোট চালুর সময় আগের পুরোনো লগগুলো সেভ করে রাখা যাতে সেগুলো বারবার ফরোয়ার্ড না হয়
     try:
         headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
         res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=5.0)
@@ -113,7 +112,7 @@ async def auto_forward_console_logs(application):
             if isinstance(hits, list):
                 for hit in hits:
                     if isinstance(hit, dict):
-                        m = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or ""
+                        m = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or hit.get("msg") or ""
                         n = str(
                             hit.get("number") or hit.get("full_number") or hit.get("phone") or 
                             hit.get("phone_number") or hit.get("mobile") or hit.get("receiver") or 
@@ -135,7 +134,7 @@ async def auto_forward_console_logs(application):
                     for hit in hits:
                         if not isinstance(hit, dict): continue
 
-                        msg = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or ""
+                        msg = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or hit.get("msg") or ""
                         num = str(
                             hit.get("number") or 
                             hit.get("full_number") or 
@@ -159,7 +158,6 @@ async def auto_forward_console_logs(application):
 
                         _, _, flag = get_country_info(num, country)
                         
-                        # ১. মেইন গ্রুপে ফরোয়ার্ড করা
                         group_text = (
                             f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
                             f"📘 <b>{service} OTP RECEIVE</b>\n\n"
@@ -182,13 +180,11 @@ async def auto_forward_console_logs(application):
                         except Exception as ex:
                             print(f"Group Forward Error: {ex}")
 
-                        # ২. ইউজারের ইনবক্সে পাঠানোর জন্য পারফেক্ট ম্যাচিং (ডিজিট ফিল্টার করে চেক করা)
                         clean_log_num = ''.join(filter(str.isdigit, num))
                         
                         for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                             req_time = u_info.get("req_time", 0)
                             
-                            # ৩০ মিনিট সময়সীমা চেক
                             if current_loop_time < req_time or (current_loop_time - req_time) > 1800:
                                 continue
 
