@@ -2,7 +2,7 @@ import os
 import asyncio
 import requests
 import re
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, CopyTextButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -27,7 +27,7 @@ def get_country_info(phone_number, api_country=""):
         if "madagascar" in c_lower: return "Madagascar", "MG", "🇲🇬"
         elif "ivory" in c_lower or "côte" in c_lower: return "Ivory Coast", "CI", "🇨🇮"
         elif "cameroon" in c_lower: return "Cameroon", "CM", "🇨🇲"
-        elif "togo" in c_lower: return "Togo", "TG", "🇹🇬"
+        elif "togo" in c_lower: return "Togo", "TG", "TG"
         elif "benin" in c_lower: return "Benin", "BJ", "🇧🇯"
         elif "tanzania" in c_lower: return "Tanzania", "TZ", "🇹🇿"
         elif "ukraine" in c_lower: return "Ukraine", "UA", "🇺🇦"
@@ -36,7 +36,7 @@ def get_country_info(phone_number, api_country=""):
     if clean_num.startswith("880"): return "Bangladesh", "BD", "🇧🇩"
     elif clean_num.startswith("237"): return "Cameroon", "CM", "🇨🇲"
     elif clean_num.startswith("225"): return "Ivory Coast", "CI", "🇨🇮"
-    elif clean_num.startswith("228"): return "Togo", "TG", "🇹🇬"
+    elif clean_num.startswith("228"): return "Togo", "TG", "TG"
     elif clean_num.startswith("261"): return "Madagascar", "MG", "🇲🇬"
     else: return "International", "INT", "🌍"
 
@@ -67,6 +67,7 @@ def _sync_check_number_sms(phone_number):
     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
     clean_num = str(phone_number).strip()
     try:
+        # Checking via check.php endpoint
         res = requests.get(f"{BASE_API_URL}/check.php?api_key={MINO_API_KEY}&number={clean_num}", headers=headers, timeout=4.0)
         if res.status_code == 200:
             return res.json()
@@ -137,30 +138,33 @@ async def auto_forward_console_logs(application):
                 check_res = await check_number_sms(u_phone)
                 if check_res:
                     messages = []
+                    # Handle all possible dictionary or list formats from check.php
                     if isinstance(check_res, dict):
-                        data_field = check_res.get("data") or check_res.get("messages") or check_res.get("sms") or check_res.get("message")
-                        if isinstance(data_field, list):
-                            messages = data_field
-                        elif isinstance(data_field, dict):
-                            messages = [data_field]
-                        elif isinstance(data_field, str) and data_field:
-                            messages = [{"message": data_field}]
-                        elif "message" in check_res or "text" in check_res:
+                        if check_res.get("status") == "success" or "data" in check_res or "messages" in check_res:
+                            data_field = check_res.get("data") or check_res.get("messages") or check_res.get("sms") or check_res.get("message")
+                            if isinstance(data_field, list):
+                                messages = data_field
+                            elif isinstance(data_field, dict):
+                                messages = [data_field]
+                            elif isinstance(data_field, str) and data_field:
+                                messages = [{"message": data_field}]
+                        # If check_res itself represents the SMS item
+                        if not messages and ("message" in check_res or "text" in check_res or "sms" in check_res):
                             messages = [check_res]
                     elif isinstance(check_res, list):
                         messages = check_res
 
                     for msg_item in messages:
+                        msg = ""
+                        service = "SMS"
+                        country = "International"
+
                         if isinstance(msg_item, str):
                             msg = msg_item
-                            service = "SMS"
-                            country = "Unknown"
                         elif isinstance(msg_item, dict):
                             msg = msg_item.get("message") or msg_item.get("text") or msg_item.get("sms") or msg_item.get("content") or msg_item.get("msg") or ""
                             service = msg_item.get("service", "SMS")
                             country = msg_item.get("country", "International")
-                        else:
-                            continue
 
                         if not msg: continue
 
@@ -203,7 +207,7 @@ async def auto_forward_console_logs(application):
                             except Exception as per_ex:
                                 print(f"Personal Send Error: {per_ex}")
 
-            # 2. Public console logs fallback
+            # 2. Public console logs fallback for group forwarding
             headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
             res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=5.0)
             if res.status_code == 200:
@@ -249,7 +253,7 @@ async def auto_forward_console_logs(application):
 def create_single_number_markup(phone_num):
     _, _, flag = get_country_info(phone_num)
     keyboard = [
-        [InlineKeyboardButton(text=f"{flag} {phone_num}", copy_text=CopyTextButton(text=phone_num))],
+        [InlineKeyboardButton(text=f"{flag} {phone_num}", callback_data=f"copy_num_{phone_num}")],
         [
             InlineKeyboardButton("🔔 OTP GROUP", url=f"https://t.me/{YOUR_TELEGRAM_USERNAME}"),
             InlineKeyboardButton("🔄 Change", callback_data="change_number")
@@ -380,6 +384,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except: pass
             await start(update, context)
 
+        elif data.startswith("copy_num_"):
+            num_to_copy = data.replace("copy_num_", "")
+            await query.answer(f"Number: {num_to_copy}", show_alert=True)
+
         elif data == "change_number":
             await query.answer("🔄 Fetching new number...")
             user_range = USER_RANGES.get(user_id, "23762XXX")
@@ -436,7 +444,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = []
             row = []
             for r_num, count in sorted(ranges.items(), key=lambda x: x[1], reverse=True):
-                row.append(InlineKeyboardButton(f"🎛 {r_num} ({count})", copy_text=CopyTextButton(text=r_num)))
+                row.append(InlineKeyboardButton(f"🎛 {r_num} ({count})", callback_data=f"tr_noop"))
                 if len(row) == 2:
                     keyboard.append(row)
                     row = []
@@ -445,8 +453,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([InlineKeyboardButton("🔙 Back", callback_data=f"tr_svc_{sid}")])
             markup = InlineKeyboardMarkup(keyboard)
             try:
-                await query.edit_message_text(f"👑 <b>Ranges for</b> 🌐 {sid} - {c_data['flag']} <b>{c_code}</b>\n\nClick range to copy:", reply_markup=markup, parse_mode="HTML")
+                await query.edit_message_text(f"👑 <b>Ranges for</b> 🌐 {sid} - {c_data['flag']} <b>{c_code}</b>\n\nActive Ranges:", reply_markup=markup, parse_mode="HTML")
             except: pass
+
+        elif data == "tr_noop":
+            await query.answer("📋 Range item")
 
         elif data == "tr_main" or data == "tr_refresh":
             await query.answer("🔄 Refreshed!")
