@@ -100,8 +100,18 @@ def _sync_fetch_live_traffic_detailed():
             hits = res_json.get("data", [])
             if isinstance(hits, list):
                 total_hits = len(hits)
+                current_time = time.time()
+                four_days_limit = 4 * 24 * 60 * 60 # ৪ দিনের সময়সীমা ফিল্টার
+                
                 for hit in hits:
                     if not isinstance(hit, dict): continue
+                    
+                    # ৩ থেকে ৪ দিনের পুরানো ডেটা ফিল্টার করার লজিক
+                    hit_timestamp = hit.get("time") or hit.get("timestamp") or hit.get("created_at")
+                    if hit_timestamp and isinstance(hit_timestamp, (int, float)):
+                        if (current_time - hit_timestamp) > four_days_limit:
+                            continue
+
                     r = hit.get("range") or hit.get("number") or hit.get("full_number", "") or hit.get("phone", "")
                     sid = str(hit.get("service", "FACEBOOK")).upper().strip()
                     api_country = hit.get("country", "")
@@ -130,7 +140,6 @@ async def fetch_live_traffic_detailed():
 async def auto_forward_console_logs(application):
     while True:
         try:
-            # গ্লোবাল কনসোল থেকে লাইভ হিট ফেচ করা
             headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
             res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=4.0)
             
@@ -139,9 +148,18 @@ async def auto_forward_console_logs(application):
                 hits = res_json.get("data", [])
                 
                 if isinstance(hits, list):
+                    current_time = time.time()
+                    four_days_limit = 4 * 24 * 60 * 60
+                    
                     for hit in hits:
                         if not isinstance(hit, dict): continue
                         
+                        # কনসোল লগেও ৩ থেকে ৪ দিনের অতিরিক্ত পুরানো হিট ফিল্টার করা
+                        hit_timestamp = hit.get("time") or hit.get("timestamp") or hit.get("created_at")
+                        if hit_timestamp and isinstance(hit_timestamp, (int, float)):
+                            if (current_time - hit_timestamp) > four_days_limit:
+                                continue
+
                         msg = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or hit.get("msg") or ""
                         hit_num = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("range", "")).strip()
                         service = hit.get("service", "SMS")
