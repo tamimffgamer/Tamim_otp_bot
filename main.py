@@ -27,7 +27,7 @@ def get_country_info(phone_number, api_country=""):
         if "madagascar" in c_lower: return "Madagascar", "MG", "🇲🇬"
         elif "ivory" in c_lower or "côte" in c_lower: return "Ivory Coast", "CI", "🇨🇮"
         elif "cameroon" in c_lower: return "Cameroon", "CM", "🇨🇲"
-        elif "togo" in c_lower: return "Togo", "TG", "🇹🇬"
+        elif "togo" in c_lower: return "Togo", "TG", "TG"
         elif "benin" in c_lower: return "Benin", "BJ", "🇧🇯"
         elif "tanzania" in c_lower: return "Tanzania", "TZ", "🇹🇿"
         elif "ukraine" in c_lower: return "Ukraine", "UA", "🇺🇦"
@@ -36,7 +36,7 @@ def get_country_info(phone_number, api_country=""):
     if clean_num.startswith("880"): return "Bangladesh", "BD", "🇧🇩"
     elif clean_num.startswith("237"): return "Cameroon", "CM", "🇨🇲"
     elif clean_num.startswith("225"): return "Ivory Coast", "CI", "🇨🇮"
-    elif clean_num.startswith("228"): return "Togo", "TG", "🇹🇬"
+    elif clean_num.startswith("228"): return "Togo", "TG", "TG"
     elif clean_num.startswith("261"): return "Madagascar", "MG", "🇲🇬"
     else: return "International", "INT", "🌍"
 
@@ -67,6 +67,7 @@ def _sync_check_number_sms(phone_number):
     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
     clean_num = str(phone_number).strip()
     try:
+        # Try both common query parameter formats for check.php
         res = requests.get(f"{BASE_API_URL}/check.php?api_key={MINO_API_KEY}&number={clean_num}", headers=headers, timeout=4.0)
         if res.status_code == 200:
             return res.json()
@@ -129,23 +130,41 @@ async def fetch_live_traffic_detailed():
 async def auto_forward_console_logs(application):
     while True:
         try:
+            # 1. Check personal active numbers
             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                 u_phone = str(u_info.get("phone", "")).strip()
                 if not u_phone: continue
 
                 check_res = await check_number_sms(u_phone)
-                if check_res and isinstance(check_res, dict):
-                    messages = check_res.get("data") or check_res.get("messages") or check_res.get("sms") or []
-                    if isinstance(messages, dict):
-                        messages = [messages]
-                    elif not isinstance(messages, list):
-                        messages = []
+                if check_res:
+                    print(f"Check Response for {u_phone}: {check_res}") # Debug log to console
+                    
+                    # Extract messages safely from any structure
+                    messages = []
+                    if isinstance(check_res, dict):
+                        data_field = check_res.get("data") or check_res.get("messages") or check_res.get("sms") or check_res.get("message")
+                        if isinstance(data_field, list):
+                            messages = data_field
+                        elif isinstance(data_field, dict):
+                            messages = [data_field]
+                        elif isinstance(data_field, str) and data_field:
+                            messages = [{"message": data_field}]
+                        elif "message" in check_res or "text" in check_res:
+                            messages = [check_res]
+                    elif isinstance(check_res, list):
+                        messages = check_res
 
                     for msg_item in messages:
-                        if not isinstance(msg_item, dict): continue
-                        msg = msg_item.get("message") or msg_item.get("text") or msg_item.get("sms") or msg_item.get("content") or msg_item.get("msg") or ""
-                        service = msg_item.get("service", "SMS")
-                        country = msg_item.get("country", "Cameroon")
+                        if isinstance(msg_item, str):
+                            msg = msg_item
+                            service = "SMS"
+                            country = "Unknown"
+                        elif isinstance(msg_item, dict):
+                            msg = msg_item.get("message") or msg_item.get("text") or msg_item.get("sms") or msg_item.get("content") or msg_item.get("msg") or ""
+                            service = msg_item.get("service", "SMS")
+                            country = msg_item.get("country", "International")
+                        else:
+                            continue
 
                         if not msg: continue
 
@@ -188,7 +207,7 @@ async def auto_forward_console_logs(application):
                             except Exception as per_ex:
                                 print(f"Personal Send Error: {per_ex}")
 
-            # Public group broadcast
+            # 2. Public console logs fallback
             headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
             res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=5.0)
             if res.status_code == 200:
@@ -200,7 +219,7 @@ async def auto_forward_console_logs(application):
                         msg = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or hit.get("msg") or ""
                         num = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("range", "")).strip()
                         service = hit.get("service", "SMS")
-                        country = hit.get("country", "Cameroon")
+                        country = hit.get("country", "International")
 
                         g_id = f"g_{num}_{msg}"
                         if g_id in SEEN_OTP_IDS or not msg: continue
