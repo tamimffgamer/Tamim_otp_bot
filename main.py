@@ -148,7 +148,7 @@ async def auto_forward_console_logs(application):
 
                         _, _, flag = get_country_info(num, country)
                         
-                        # শুধুমাত্র ডিজিটগুলো ফিল্টার করে নেওয়া
+                        # নাম্বারের শুধু ডিজিটগুলো নিয়ে শেষ ৯ ডিজিট মেলানোর ব্যবস্থা
                         clean_console_num = re.sub(r'\D', '', num)
                         
                         for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
@@ -160,11 +160,10 @@ async def auto_forward_console_logs(application):
                                 continue
 
                             if u_clean and clean_console_num:
-                                # শেষ ৯টি ডিজিট বের করা
                                 u_suffix = u_clean[-9:] if len(u_clean) >= 9 else u_clean
                                 c_suffix = clean_console_num[-9:] if len(clean_console_num) >= 9 else clean_console_num
                                 
-                                # শেষের ৯ ডিজিট হুবহু মিলে গেলে কোড ফরোয়ার্ড হবে
+                                # শেষ ৯ ডিজিট মিলে গেলেই ওটিপি চলে যাবে
                                 if u_suffix and c_suffix and (u_suffix == c_suffix):
                                     sent_set = u_info.setdefault("sent_otps", set())
                                     if otp_code_g not in sent_set:
@@ -482,4 +481,5 @@ if __name__ == '__main__':
     server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
-    app.run_polling()
+    # আগের সব conflicting গেট-আপডেট সেশন ড্রপ করে নতুন করে বট সচল করবে
+    app.run_polling(drop_pending_updates=True)
