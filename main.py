@@ -124,6 +124,7 @@ async def auto_forward_console_logs(application):
                 res_json = res.json()
                 hits = res_json.get("data", [])
                 if isinstance(hits, list):
+                    current_time = time.time()
                     for hit in hits:
                         if not isinstance(hit, dict): continue
                         msg = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or hit.get("msg") or ""
@@ -135,8 +136,6 @@ async def auto_forward_console_logs(application):
                         if str(msg).lower().strip() in ["success", "completed", "waiting", "failed"]:
                             continue
 
-                        print(f"DEBUG HIT -> Number: {num} | Msg: {msg}") # প্যানেলের কনসোলে কি ডাটা আসছে তা দেখার জন্য
-
                         g_id = f"g_{num}_{msg}"
                         if g_id in SEEN_OTP_IDS: continue
                         SEEN_OTP_IDS.add(g_id)
@@ -146,14 +145,20 @@ async def auto_forward_console_logs(application):
                         otp_code_g = match_otp_g.group(0)
 
                         _, _, flag = get_country_info(num, country)
-
                         clean_console_num = num.replace("+", "").strip()
                         
-                        # যদি একটিভ ইউজার লিস্ট ফাকা থাকে বা নাম্বার ম্যাচ না করে তবুও গ্রুপে যেন কোড যায় এবং ইউজার চেক ইমপ্রুভ করা হলো
+                        # শুধুমাত্র নির্দিষ্ট ইউজারের জন্য ২০ মিনিটের মধ্যে আসা কোড ফিল্টার করা
                         for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                             u_phone = str(u_info.get("phone", "")).replace("+", "").strip()
-                            print(f"CHECKING -> User Phone: {u_phone} vs Console Num: {clean_console_num}")
+                            fetch_time = u_info.get("fetch_time", 0)
                             
+                            # নাম্বার নেওয়ার সময় থেকে বর্তমান সময়ের পার্থক্য (সেকেন্ডে)
+                            time_diff = current_time - fetch_time
+                            
+                            # যদি ২০ মিনিট (১২০০ সেকেন্ড) পার হয়ে যায়, তবে এই নাম্বারের একটিভ সেশন বাদ দিয়ে দেব
+                            if time_diff > 1200:
+                                continue
+
                             if u_phone and (u_phone in clean_console_num or clean_console_num in u_phone or u_phone == clean_console_num):
                                 sent_set = u_info.setdefault("sent_otps", set())
                                 if otp_code_g not in sent_set:
@@ -185,7 +190,7 @@ async def auto_forward_console_logs(application):
                                     except Exception as per_ex:
                                         print(f"Personal Send Error: {per_ex}")
 
-                        # পাবলিক বা গ্লোবাল ওটিপি গ্রুপে পাঠানোর লজিক
+                        # গ্লোবাল গ্রুপে পাঠানোর লজিক (এটি চাইলে রাখতে পারেন অথবা বন্ধ করতে পারেন)
                         group_text = (
                             f"🟢 <b>{service} OTP RECEIVED</b>\n\n"
                             f"🌍 <b>Country :</b> {country} ({flag})\n"
@@ -204,8 +209,7 @@ async def auto_forward_console_logs(application):
                                 reply_markup=group_markup, 
                                 parse_mode="HTML"
                             )
-                        except Exception as g_ex:
-                            print(f"Group Send Error: {g_ex}")
+                        except: pass
             else:
                 print(f"Console API Status Code: {res.status_code}")
 
@@ -295,7 +299,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
 
             country_name, _, flag = get_country_info(phone)
-            header_text = f"✅ <b>Number:</b> {flag} {country_name}\n\nEkhon ei number-ti te OTP pathale sathe sathe apnake real code ekhane pathiye dewa hobe!"
+            header_text = f"✅ <b>Number:</b> {flag} {country_name}\n\nEkhon ei number-ti te OTP pathale sathe sathe apnake real code ekhane pathiye dewa hobe! (Valid for 20 mins)"
             reply_markup = create_single_number_markup(phone)
             await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
 
