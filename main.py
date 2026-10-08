@@ -130,7 +130,6 @@ async def auto_forward_console_logs(application):
                 res_json = res.json()
                 hits = res_json.get("data", [])
                 if isinstance(hits, list):
-                    current_loop_time = time.time()
                     for hit in hits:
                         if not isinstance(hit, dict): continue
 
@@ -183,11 +182,6 @@ async def auto_forward_console_logs(application):
                         clean_log_num = ''.join(filter(str.isdigit, num))
                         
                         for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
-                            req_time = u_info.get("req_time", 0)
-                            
-                            if current_loop_time < req_time or (current_loop_time - req_time) > 1800:
-                                continue
-
                             u_phone = str(u_info.get("phone", "")).strip()
                             clean_u_phone = ''.join(filter(str.isdigit, u_phone))
                             
@@ -227,7 +221,7 @@ async def auto_forward_console_logs(application):
                                         print(f"Personal Send Error: {per_ex}")
         except Exception as e:
             print(f"Background Loop Error: {e}")
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.5)
 
 def create_single_number_markup(phone_num):
     _, _, flag = get_country_info(phone_num)
@@ -299,7 +293,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": update.effective_chat.id,
-            "req_time": time.time(),
             "sent_otps": set()
         }
 
@@ -366,7 +359,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ACTIVE_USER_NUMBERS[user_id] = {
             "phone": phone,
             "chat_id": query.message.chat_id,
-            "req_time": time.time(),
             "sent_otps": set()
         }
 
