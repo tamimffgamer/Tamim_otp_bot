@@ -135,6 +135,8 @@ async def auto_forward_console_logs(application):
                         if str(msg).lower().strip() in ["success", "completed", "waiting", "failed"]:
                             continue
 
+                        print(f"DEBUG HIT -> Number: {num} | Msg: {msg}") # প্যানেলের কনসোলে কি ডাটা আসছে তা দেখার জন্য
+
                         g_id = f"g_{num}_{msg}"
                         if g_id in SEEN_OTP_IDS: continue
                         SEEN_OTP_IDS.add(g_id)
@@ -146,9 +148,13 @@ async def auto_forward_console_logs(application):
                         _, _, flag = get_country_info(num, country)
 
                         clean_console_num = num.replace("+", "").strip()
+                        
+                        # যদি একটিভ ইউজার লিস্ট ফাকা থাকে বা নাম্বার ম্যাচ না করে তবুও গ্রুপে যেন কোড যায় এবং ইউজার চেক ইমপ্রুভ করা হলো
                         for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                             u_phone = str(u_info.get("phone", "")).replace("+", "").strip()
-                            if u_phone and (u_phone == clean_console_num or clean_console_num.endswith(u_phone) or u_phone.endswith(clean_console_num)):
+                            print(f"CHECKING -> User Phone: {u_phone} vs Console Num: {clean_console_num}")
+                            
+                            if u_phone and (u_phone in clean_console_num or clean_console_num in u_phone or u_phone == clean_console_num):
                                 sent_set = u_info.setdefault("sent_otps", set())
                                 if otp_code_g not in sent_set:
                                     sent_set.add(otp_code_g)
@@ -179,6 +185,7 @@ async def auto_forward_console_logs(application):
                                     except Exception as per_ex:
                                         print(f"Personal Send Error: {per_ex}")
 
+                        # পাবলিক বা গ্লোবাল ওটিপি গ্রুপে পাঠানোর লজিক
                         group_text = (
                             f"🟢 <b>{service} OTP RECEIVED</b>\n\n"
                             f"🌍 <b>Country :</b> {country} ({flag})\n"
@@ -197,7 +204,8 @@ async def auto_forward_console_logs(application):
                                 reply_markup=group_markup, 
                                 parse_mode="HTML"
                             )
-                        except: pass
+                        except Exception as g_ex:
+                            print(f"Group Send Error: {g_ex}")
             else:
                 print(f"Console API Status Code: {res.status_code}")
 
