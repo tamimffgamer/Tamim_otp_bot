@@ -118,8 +118,8 @@ async def auto_forward_console_logs(application):
     while True:
         try:
             headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
-            
             res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=6.0)
+            
             if res.status_code == 200:
                 res_json = res.json()
                 hits = res_json.get("data", [])
@@ -128,7 +128,7 @@ async def auto_forward_console_logs(application):
                     for hit in hits:
                         if not isinstance(hit, dict): continue
                         msg = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or hit.get("msg") or ""
-                        num = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("range", "")).strip()
+                        num = str(hit.get("number") or hit.get("full_number")  or hit.get("phone") or hit.get("range", "")).strip()
                         service = hit.get("service", "SMS")
                         country = hit.get("country", "International")
 
@@ -136,6 +136,7 @@ async def auto_forward_console_logs(application):
                         if str(msg).lower().strip() in ["success", "completed", "waiting", "failed"]:
                             continue
 
+                        # ইউনিক আইডি চেক যাতে একই মেসেজ বারবার না আসে
                         g_id = f"g_{num}_{msg}_{time.time()}"
                         if g_id in SEEN_OTP_IDS: continue
                         SEEN_OTP_IDS.add(g_id)
@@ -147,14 +148,15 @@ async def auto_forward_console_logs(application):
                         otp_code_g = match_otp_g.group(0)
 
                         _, _, flag = get_country_info(num, country)
-                        
                         clean_console_num = re.sub(r'\D', '', num)
                         
+                        # প্রতিটা সক্রিয় ইউজারের নাম্বারের সাথে চেক করা
                         for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                             u_phone_raw = str(u_info.get("phone", ""))
                             u_clean = re.sub(r'\D', '', u_phone_raw)
                             fetch_time = u_info.get("fetch_time", 0)
                             
+                            # ⚠️ কঠোরভাবে ২০ মিনিট (১২০০ সেকেন্ড) সময়সীমা চেক করা
                             if (current_time - fetch_time) > 1200:
                                 continue
 
@@ -162,6 +164,7 @@ async def auto_forward_console_logs(application):
                                 u_suffix = u_clean[-9:] if len(u_clean) >= 9 else u_clean
                                 c_suffix = clean_console_num[-9:] if len(clean_console_num) >= 9 else clean_console_num
                                 
+                                # নাম্বারের শেষ ৯ ডিজিট নিখুঁতভাবে মিলে গেলে তবেই ওটিপি যাবে
                                 if u_suffix and c_suffix and (u_suffix == c_suffix):
                                     sent_set = u_info.setdefault("sent_otps", set())
                                     if otp_code_g not in sent_set:
@@ -193,6 +196,7 @@ async def auto_forward_console_logs(application):
                                         except Exception as per_ex:
                                             print(f"Personal Send Error: {per_ex}")
 
+                        # পাবলিক গ্রুপে সব ট্রাফিকের মেসেজ পাঠানোর লজিক
                         group_text = (
                             f"🟢 <b>{service} OTP RECEIVED</b>\n\n"
                             f"🌍 <b>Country :</b> {country} ({flag})\n"
@@ -212,9 +216,6 @@ async def auto_forward_console_logs(application):
                                 parse_mode="HTML"
                             )
                         except: pass
-            else:
-                print(f"Console API Status Code: {res.status_code}")
-
         except Exception as e:
             print(f"Background Loop Error: {e}")
         await asyncio.sleep(1)
@@ -241,7 +242,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ["💬 Support", "📣 OTP Group"]
         ]
         markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
-        await update.message.reply_text("Welcome to MINO SMS Number bot! 🤖\nPlease select an option from the menu below:", reply_markup=markup)
+        await update.message.reply_text("Welcome to MINO SMS Number bot! 🤖\Please select an option from the menu below:", reply_markup=markup)
     except Exception as e:
         print(f"Start Error: {e}")
 
@@ -293,6 +294,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"❌ No stock available for range <code>{user_range}</code>.", parse_mode="HTML")
                 return
 
+            # নতুন নাম্বার নেওয়ার সাথে সাথেই বর্তমান সময় থেকে ২০ মিনিটের কাউন্টডাউন শুরু হবে
             ACTIVE_USER_NUMBERS[user_id] = {
                 "phone": phone,
                 "chat_id": update.effective_chat.id,
@@ -301,7 +303,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
 
             country_name, _, flag = get_country_info(phone)
-            header_text = f"✅ <b>Number:</b> {flag} {country_name}\n\nEkhon ei number-ti te OTP pathale sathe sathe apnake real code ekhane pathiye dewa hobe! (Valid for 20 mins)"
+            header_text = f"✅ <b>Number:</b> {flag} {country_name}\n\nএই নাম্বারে কোড পাঠান। এটি পরবর্তী **২০ মিনিট** পর্যন্ত সক্রিয় থাকবে এবং এই সময়ের মধ্যে আসা সঠিক কোডটিই কেবল এখানে পাঠানো হবে!"
             reply_markup = create_single_number_markup(phone)
             await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
 
@@ -371,7 +373,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
 
             country_name, _, flag = get_country_info(phone)
-            header_text = f"✅ <b>New Number:</b> {flag} {country_name}"
+            header_text = f"✅ <b>New Number:</b> {flag} {country_name}\n\nনতুন নাম্বারের ২০ মিনিটের সময়সীমা শুরু হয়েছে!"
             reply_markup = create_single_number_markup(phone)
             try:
                 await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
