@@ -149,7 +149,6 @@ async def auto_forward_console_logs(application):
                         _, _, flag = get_country_info(num, country)
                         clean_console_num = num.replace("+", "").strip()
                         
-                        # ইউজারের নাম্বারের শেষ ৯ ডিজিট এবং কনসোল নাম্বারের শেষ ৯ ডিজিট মেলানো
                         for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                             u_phone = str(u_info.get("phone", "")).replace("+", "").strip()
                             fetch_time = u_info.get("fetch_time", 0)
@@ -454,11 +453,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Callback Error: {e}")
 
-async def post_init(application):
-    application.create_task(auto_forward_console_logs(application))
+async def on_startup(application):
+    asyncio.create_task(auto_forward_console_logs(application))
 
 if __name__ == '__main__':
-    app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('help', help_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
