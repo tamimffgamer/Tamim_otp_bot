@@ -27,7 +27,7 @@ def get_country_info(phone_number, api_country=""):
         if "madagascar" in c_lower: return "Madagascar", "MG", "🇲🇬"
         elif "ivory" in c_lower or "côte" in c_lower: return "Ivory Coast", "CI", "🇨🇮"
         elif "cameroon" in c_lower: return "Cameroon", "CM", "🇨🇲"
-        elif "togo" in c_lower: return "Togo", "TG", "🇹🇬"
+        elif "togo" in c_lower: return "Togo", "TG", "TG"
         elif "benin" in c_lower: return "Benin", "BJ", "🇧🇯"
         elif "tanzania" in c_lower: return "Tanzania", "TZ", "🇹🇿"
         elif "ukraine" in c_lower: return "Ukraine", "UA", "🇺🇦"
@@ -134,9 +134,12 @@ async def auto_forward_console_logs(application):
                 u_phone = str(u_info.get("phone", "")).strip()
                 if not u_phone: continue
 
+                clean_u_phone = u_phone.replace("+", "").strip()
+
                 check_res = await check_number_sms(u_phone)
+                messages = []
+                
                 if check_res:
-                    messages = []
                     if isinstance(check_res, dict):
                         data_field = check_res.get("data") or check_res.get("messages") or check_res.get("sms") or check_res.get("message")
                         if isinstance(data_field, list):
@@ -145,63 +148,81 @@ async def auto_forward_console_logs(application):
                             messages = [data_field]
                         elif isinstance(data_field, str) and data_field:
                             messages = [{"message": data_field}]
-                        elif "message" in check_res or "text" in check_res:
+                        if not messages and ("message" in check_res or "text" in check_res or "sms" in check_res):
                             messages = [check_res]
                     elif isinstance(check_res, list):
                         messages = check_res
 
-                    for msg_item in messages:
-                        if isinstance(msg_item, str):
-                            msg = msg_item
-                            service = "SMS"
-                            country = "Unknown"
-                        elif isinstance(msg_item, dict):
-                            msg = msg_item.get("message") or msg_item.get("text") or msg_item.get("sms") or msg_item.get("content") or msg_item.get("msg") or ""
-                            service = msg_item.get("service", "SMS")
-                            country = msg_item.get("country", "International")
-                        else:
-                            continue
+                # Also check global console hits to make sure OTP is caught instantly
+                try:
+                    headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
+                    res = requests.get(f"{BASE_API_URL}/console.php", headers=headers, timeout=3.0)
+                    if res.status_code == 200:
+                        hits = res.json().get("data", [])
+                        if isinstance(hits, list):
+                            for hit in hits:
+                                if not isinstance(hit, dict): continue
+                                hit_num = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("range", "")).strip()
+                                clean_hit_num = hit_num.replace("+", "").strip()
+                                
+                                if clean_hit_num and (clean_hit_num == clean_u_phone or clean_u_phone in clean_hit_num or clean_hit_num in clean_u_phone):
+                                    if hit not in messages:
+                                        messages.append(hit)
+                except:
+                    pass
 
-                        if not msg: continue
+                for msg_item in messages:
+                    msg = ""
+                    service = "SMS"
+                    country = "International"
 
-                        log_id = f"{u_phone}_{msg}"
-                        if log_id in SEEN_OTP_IDS:
-                            continue
+                    if isinstance(msg_item, str):
+                        msg = msg_item
+                    elif isinstance(msg_item, dict):
+                        msg = msg_item.get("message") or msg_item.get("text") or msg_item.get("sms") or msg_item.get("content") or msg_item.get("msg") or ""
+                        service = msg_item.get("service", "SMS")
+                        country = msg_item.get("country", "International")
+
+                    if not msg: continue
+
+                    log_id = f"{u_phone}_{msg}"
+                    if log_id in SEEN_OTP_IDS:
+                        continue
+                    
+                    SEEN_OTP_IDS.add(log_id)
+                    if len(SEEN_OTP_IDS) > 5000:
+                        SEEN_OTP_IDS.pop()
+
+                    _, _, flag = get_country_info(u_phone, country)
+
+                    match_otp = re.search(r'\b\d{4,8}\b', msg)
+                    otp_code = match_otp.group(0) if match_otp else msg
+                    
+                    sent_set = u_info.setdefault("sent_otps", set())
+                    if otp_code not in sent_set:
+                        sent_set.add(otp_code)
+                        current_bal = USER_BALANCES.get(user_id, 0.0)
+                        USER_BALANCES[user_id] = current_bal + 0.00122
                         
-                        SEEN_OTP_IDS.add(log_id)
-                        if len(SEEN_OTP_IDS) > 5000:
-                            SEEN_OTP_IDS.pop()
-
-                        _, _, flag = get_country_info(u_phone, country)
-
-                        match_otp = re.search(r'\b\d{4,8}\b', msg)
-                        otp_code = match_otp.group(0) if match_otp else msg
-                        
-                        sent_set = u_info.setdefault("sent_otps", set())
-                        if otp_code not in sent_set:
-                            sent_set.add(otp_code)
-                            current_bal = USER_BALANCES.get(user_id, 0.0)
-                            USER_BALANCES[user_id] = current_bal + 0.00122
-                            
-                            personal_text = (
-                                f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
-                                f"🚨 <b>YOUR NUMBER OTP RECEIVE</b>\n\n"
-                                f"📘 <b>Service :</b> {service}\n"
-                                f"🌍 <b>Country :</b> {country} ({flag})\n"
-                                f"🎯 <b>Number :</b> <code>{u_phone}</code>\n"
-                                f"🔑 <b>OTP Code :</b> <code>{otp_code}</code>\n\n"
-                                f"✉ <b>Full Message :</b>\n<code>{msg}</code>\n\n"
-                                f"💰 <b>Earned:</b> +$0.00122"
+                        personal_text = (
+                            f"🤖 <b>𝑻𝑨𝑴𝒊𝑴 𝑶𝑻𝑷 𝑩𝑶𝑻</b> 🤖\n\n"
+                            f"🚨 <b>YOUR NUMBER OTP RECEIVE</b>\n\n"
+                            f"📘 <b>Service :</b> {service}\n"
+                            f"🌍 <b>Country :</b> {country} ({flag})\n"
+                            f"🎯 <b>Number :</b> <code>{u_phone}</code>\n"
+                            f"🔑 <b>OTP Code :</b> <code>{otp_code}</code>\n\n"
+                            f"✉ <b>Full Message :</b>\n<code>{msg}</code>\n\n"
+                            f"💰 <b>Earned:</b> +$0.00122"
+                        )
+                        try:
+                            await application.bot.send_message(
+                                chat_id=u_info["chat_id"], 
+                                text=personal_text, 
+                                parse_mode="HTML"
                             )
-                            try:
-                                await application.bot.send_message(
-                                    chat_id=u_info["chat_id"], 
-                                    text=personal_text, 
-                                    parse_mode="HTML"
-                                )
-                                await success_otp(u_phone)
-                            except Exception as per_ex:
-                                print(f"Personal Send Error: {per_ex}")
+                            await success_otp(u_phone)
+                        except Exception as per_ex:
+                            print(f"Personal Send Error: {per_ex}")
 
             # 2. Public console logs fallback
             headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
