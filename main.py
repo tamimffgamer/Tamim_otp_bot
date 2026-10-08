@@ -27,16 +27,16 @@ def get_country_info(phone_number, api_country=""):
         if "madagascar" in c_lower: return "Madagascar", "MG", "🇲🇬"
         elif "ivory" in c_lower or "côte" in c_lower: return "Ivory Coast", "CI", "🇨🇮"
         elif "cameroon" in c_lower: return "Cameroon", "CM", "🇨🇲"
-        elif "togo" in c_lower: return "Togo", "TG", "TG"
+        elif "togo" in c_lower: return "Togo", "TG", "🇹🇬"
         elif "benin" in c_lower: return "Benin", "BJ", "🇧🇯"
         elif "tanzania" in c_lower: return "Tanzania", "TZ", "🇹🇿"
         elif "ukraine" in c_lower: return "Ukraine", "UA", "🇺🇦"
-        elif "kyrgyzstan" in c_lower: return "Kyrgyzstan", "KG", "🇰🇬"
+        elif "kyrgyzstan" in c_lower: return "Kyrgyzstan", "KG", "KG"
     
     if clean_num.startswith("880"): return "Bangladesh", "BD", "🇧🇩"
     elif clean_num.startswith("237"): return "Cameroon", "CM", "🇨🇲"
     elif clean_num.startswith("225"): return "Ivory Coast", "CI", "🇨🇮"
-    elif clean_num.startswith("228"): return "Togo", "TG", "TG"
+    elif clean_num.startswith("228"): return "Togo", "TG", "🇹🇬"
     elif clean_num.startswith("261"): return "Madagascar", "MG", "🇲🇬"
     else: return "International", "INT", "🌍"
 
@@ -67,7 +67,6 @@ def _sync_check_number_sms(phone_number):
     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
     clean_num = str(phone_number).strip()
     try:
-        # Try both common query parameter formats for check.php
         res = requests.get(f"{BASE_API_URL}/check.php?api_key={MINO_API_KEY}&number={clean_num}", headers=headers, timeout=4.0)
         if res.status_code == 200:
             return res.json()
@@ -137,9 +136,6 @@ async def auto_forward_console_logs(application):
 
                 check_res = await check_number_sms(u_phone)
                 if check_res:
-                    print(f"Check Response for {u_phone}: {check_res}") # Debug log to console
-                    
-                    # Extract messages safely from any structure
                     messages = []
                     if isinstance(check_res, dict):
                         data_field = check_res.get("data") or check_res.get("messages") or check_res.get("sms") or check_res.get("message")
@@ -263,214 +259,226 @@ def create_single_number_markup(phone_num):
     return InlineKeyboardMarkup(keyboard)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    USER_STATES[user_id] = None
-    reply_keyboard = [
-        ["📞 Get API Number", "⚙ Set Range"],
-        ["🟢 Live Traffic", "💳 Balance"],
-        ["💬 Support", "📣 OTP Group"]
-    ]
-    markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
-    await update.message.reply_text("Welcome to MINO SMS Number bot! 🤖\nPlease select an option from the menu below:", reply_markup=markup)
+    try:
+        user_id = update.effective_user.id
+        USER_STATES[user_id] = None
+        reply_keyboard = [
+            ["📞 Get API Number", "⚙ Set Range"],
+            ["🟢 Live Traffic", "💳 Balance"],
+            ["💬 Support", "📣 OTP Group"]
+        ]
+        markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
+        await update.message.reply_text("Welcome to MINO SMS Number bot! 🤖\nPlease select an option from the menu below:", reply_markup=markup)
+    except Exception as e:
+        print(f"Start Error: {e}")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    support_markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📞 সাপোর্টে যোগাযোগ করুন", url=f"https://t.me/{SUPPORT_USERNAME}")]
-    ])
-    await update.message.reply_text("💬 <b>সাপোর্ট সেন্টার</b>\n\nযেকোনো সমস্যা থাকলে নিচের বাটনে যোগাযোগ করুন:", reply_markup=support_markup, parse_mode="HTML")
+    try:
+        support_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📞 সাপোর্টে যোগাযোগ করুন", url=f"https://t.me/{SUPPORT_USERNAME}")]
+        ])
+        await update.message.reply_text("💬 <b>সাপোর্ট সেন্টার</b>\n\nযেকোনো সমস্যা থাকলে নিচের বাটনে যোগাযোগ করুন:", reply_markup=support_markup, parse_mode="HTML")
+    except Exception as e:
+        print(f"Help Error: {e}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    text = update.message.text or ""
-    state = USER_STATES.get(user_id)
+    try:
+        user_id = update.effective_user.id
+        text = update.message.text or ""
+        state = USER_STATES.get(user_id)
 
-    if state == "WAITING_FOR_RANGE":
-        clean_text = text.strip()
-        if len(clean_text) >= 3:
+        if state == "WAITING_FOR_RANGE":
+            clean_text = text.strip()
+            if len(clean_text) >= 3:
+                USER_STATES[user_id] = None
+                USER_RANGES[user_id] = clean_text
+                await update.message.reply_text(f"🔴 Target range updated to: <b>{clean_text}</b>", parse_mode="HTML")
+            else:
+                await update.message.reply_text("🔴 Invalid range! Please enter a valid number prefix.")
+            return
+        elif state == "WAITING_FOR_BKASH":
             USER_STATES[user_id] = None
-            USER_RANGES[user_id] = clean_text
-            await update.message.reply_text(f"🔴 Target range updated to: <b>{clean_text}</b>", parse_mode="HTML")
-        else:
-            await update.message.reply_text("🔴 Invalid range! Please enter a valid number prefix.")
-        return
-    elif state == "WAITING_FOR_BKASH":
-        USER_STATES[user_id] = None
-        USER_WITHDRAW_INFO[user_id] = f"bKash: {text.strip()}"
-        await update.message.reply_text(f"✅ bKash number saved: <code>{text.strip()}</code>", parse_mode="HTML")
-        return
-    elif state == "WAITING_FOR_BINANCE":
-        USER_STATES[user_id] = None
-        USER_WITHDRAW_INFO[user_id] = f"Binance ID: {text.strip()}"
-        await update.message.reply_text(f"✅ Binance ID saved: <code>{text.strip()}</code>", parse_mode="HTML")
-        return
-
-    if "Get API Number" in text:
-        USER_STATES[user_id] = None
-        wait_msg = await update.message.reply_text("⏳ Fetching real number from MINO panel...")
-        user_range = USER_RANGES.get(user_id, "23762XXX")
-        
-        phone, _ = await get_mino_real_number(target_range=user_range)
-        try: await wait_msg.delete()
-        except: pass
-
-        if not phone:
-            await update.message.reply_text(f"❌ No stock available for range <code>{user_range}</code>.", parse_mode="HTML")
+            USER_WITHDRAW_INFO[user_id] = f"bKash: {text.strip()}"
+            await update.message.reply_text(f"✅ bKash number saved: <code>{text.strip()}</code>", parse_mode="HTML")
+            return
+        elif state == "WAITING_FOR_BINANCE":
+            USER_STATES[user_id] = None
+            USER_WITHDRAW_INFO[user_id] = f"Binance ID: {text.strip()}"
+            await update.message.reply_text(f"✅ Binance ID saved: <code>{text.strip()}</code>", parse_mode="HTML")
             return
 
-        ACTIVE_USER_NUMBERS[user_id] = {
-            "phone": phone,
-            "chat_id": update.effective_chat.id,
-            "sent_otps": set()
-        }
+        if "Get API Number" in text:
+            USER_STATES[user_id] = None
+            wait_msg = await update.message.reply_text("⏳ Fetching real number from MINO panel...")
+            user_range = USER_RANGES.get(user_id, "23762XXX")
+            
+            phone, _ = await get_mino_real_number(target_range=user_range)
+            try: await wait_msg.delete()
+            except: pass
 
-        country_name, _, flag = get_country_info(phone)
-        header_text = f"✅ <b>Number:</b> {flag} {country_name}\n\nEkhon ei number-ti te OTP pathale sathe sathe apnake real code ekhane pathiye dewa hobe!"
-        reply_markup = create_single_number_markup(phone)
-        await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
+            if not phone:
+                await update.message.reply_text(f"❌ No stock available for range <code>{user_range}</code>.", parse_mode="HTML")
+                return
 
-    elif "Set Range" in text:
-        USER_STATES[user_id] = "WAITING_FOR_RANGE"
-        await update.message.reply_text("🔴 Please send your target number range (e.g. 23762XXX):")
+            ACTIVE_USER_NUMBERS[user_id] = {
+                "phone": phone,
+                "chat_id": update.effective_chat.id,
+                "sent_otps": set()
+            }
 
-    elif "Live Traffic" in text or "TRAFFIC" in text:
-        USER_STATES[user_id] = None
-        service_data, total_hits = await fetch_live_traffic_detailed()
-        
-        if not service_data:
-            await update.message.reply_text("⚠ No active traffic found right now.", parse_mode="HTML")
-            return
+            country_name, _, flag = get_country_info(phone)
+            header_text = f"✅ <b>Number:</b> {flag} {country_name}\n\nEkhon ei number-ti te OTP pathale sathe sathe apnake real code ekhane pathiye dewa hobe!"
+            reply_markup = create_single_number_markup(phone)
+            await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
 
-        keyboard = []
-        for sid in sorted(service_data.keys()):
-            total_sid_otp = sum(sum(c_info["ranges"].values()) for c_info in service_data[sid].values())
-            keyboard.append([InlineKeyboardButton(f"👀 Explore {sid.title()} Range ({total_sid_otp})", callback_data=f"tr_svc_{sid}")])
-        
-        keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data="tr_refresh"), InlineKeyboardButton("❌ Close", callback_data="tr_close")])
-        markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(f"📊 <b>Live Traffic Panel</b>\n📋 <b>Total OTP:</b> {total_hits}\nSelect a service below:", reply_markup=markup, parse_mode="HTML")
+        elif "Set Range" in text:
+            USER_STATES[user_id] = "WAITING_FOR_RANGE"
+            await update.message.reply_text("🔴 Please send your target number range (e.g. 23762XXX):")
 
-    elif "Balance" in text:
-        USER_STATES[user_id] = None
-        user_bal = USER_BALANCES.get(user_id, 0.0)
-        saved_info = USER_WITHDRAW_INFO.get(user_id, "Not Set")
-        balance_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💸 Withdraw", callback_data="withdraw_menu")],
-            [InlineKeyboardButton("📱 Set bKash", callback_data="set_bkash"), InlineKeyboardButton("🔴 Set Binance", callback_data="set_binance")]
-        ])
-        await update.message.reply_text(f"💳 <b>Balance:</b> ${user_bal:.5f}\n📂 <b>Payout Info:</b> {saved_info}", reply_markup=balance_markup, parse_mode="HTML")
+        elif "Live Traffic" in text or "TRAFFIC" in text:
+            USER_STATES[user_id] = None
+            service_data, total_hits = await fetch_live_traffic_detailed()
+            
+            if not service_data:
+                await update.message.reply_text("⚠ No active traffic found right now.", parse_mode="HTML")
+                return
 
-    elif "Support" in text: await help_command(update, context)
-    elif "OTP Group" in text:
-        group_markup = InlineKeyboardMarkup([[InlineKeyboardButton("📣 Join OTP Group", url=f"https://t.me/{YOUR_TELEGRAM_USERNAME}")]])
-        await update.message.reply_text("📣 Join official OTP group:", reply_markup=group_markup)
+            keyboard = []
+            for sid in sorted(service_data.keys()):
+                total_sid_otp = sum(sum(c_info["ranges"].values()) for c_info in service_data[sid].values())
+                keyboard.append([InlineKeyboardButton(f"👀 Explore {sid.title()} Range ({total_sid_otp})", callback_data=f"tr_svc_{sid}")])
+            
+            keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data="tr_refresh"), InlineKeyboardButton("❌ Close", callback_data="tr_close")])
+            markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(f"📊 <b>Live Traffic Panel</b>\n📋 <b>Total OTP:</b> {total_hits}\nSelect a service below:", reply_markup=markup, parse_mode="HTML")
+
+        elif "Balance" in text:
+            USER_STATES[user_id] = None
+            user_bal = USER_BALANCES.get(user_id, 0.0)
+            saved_info = USER_WITHDRAW_INFO.get(user_id, "Not Set")
+            balance_markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("💸 Withdraw", callback_data="withdraw_menu")],
+                [InlineKeyboardButton("📱 Set bKash", callback_data="set_bkash"), InlineKeyboardButton("🔴 Set Binance", callback_data="set_binance")]
+            ])
+            await update.message.reply_text(f"💳 <b>Balance:</b> ${user_bal:.5f}\n📂 <b>Payout Info:</b> {saved_info}", reply_markup=balance_markup, parse_mode="HTML")
+
+        elif "Support" in text: await help_command(update, context)
+        elif "OTP Group" in text:
+            group_markup = InlineKeyboardMarkup([[InlineKeyboardButton("📣 Join OTP Group", url=f"https://t.me/{YOUR_TELEGRAM_USERNAME}")]])
+            await update.message.reply_text("📣 Join official OTP group:", reply_markup=group_markup)
+    except Exception as e:
+        print(f"Message Handler Error: {e}")
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    data = query.data
-    user_id = query.from_user.id
+    try:
+        query = update.callback_query
+        data = query.data
+        user_id = query.from_user.id
 
-    if data == "back_home":
-        try: await query.message.delete()
-        except: pass
-        await start(update, context)
+        if data == "back_home":
+            try: await query.message.delete()
+            except: pass
+            await start(update, context)
 
-    elif data == "change_number":
-        await query.answer("🔄 Fetching new number...")
-        user_range = USER_RANGES.get(user_id, "23762XXX")
-        phone, _ = await get_mino_real_number(target_range=user_range)
-        
-        if not phone:
-            await query.answer(f"❌ No stock available for range {user_range}.", show_alert=True)
-            return
+        elif data == "change_number":
+            await query.answer("🔄 Fetching new number...")
+            user_range = USER_RANGES.get(user_id, "23762XXX")
+            phone, _ = await get_mino_real_number(target_range=user_range)
+            
+            if not phone:
+                await query.answer(f"❌ No stock available for range {user_range}.", show_alert=True)
+                return
 
-        ACTIVE_USER_NUMBERS[user_id] = {
-            "phone": phone,
-            "chat_id": query.message.chat_id,
-            "sent_otps": set()
-        }
+            ACTIVE_USER_NUMBERS[user_id] = {
+                "phone": phone,
+                "chat_id": query.message.chat_id,
+                "sent_otps": set()
+            }
 
-        country_name, _, flag = get_country_info(phone)
-        header_text = f"✅ <b>New Number:</b> {flag} {country_name}"
-        reply_markup = create_single_number_markup(phone)
-        try:
-            await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
-        except:
-            await query.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
+            country_name, _, flag = get_country_info(phone)
+            header_text = f"✅ <b>New Number:</b> {flag} {country_name}"
+            reply_markup = create_single_number_markup(phone)
+            try:
+                await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
+            except:
+                await query.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
 
-    elif data.startswith("tr_svc_"):
-        await query.answer()
-        sid = data.replace("tr_svc_", "")
-        service_data, _ = await fetch_live_traffic_detailed()
-        if sid not in service_data:
-            await query.answer("⚠️ No data available!", show_alert=True)
-            return
-        
-        countries = service_data[sid]
-        keyboard = []
-        for c_code, c_info in sorted(countries.items(), key=lambda x: sum(x[1]["ranges"].values()), reverse=True):
-            c_otp_count = sum(c_info["ranges"].values())
-            keyboard.append([InlineKeyboardButton(f"{c_info['flag']} {c_info['name']} ({c_code}) - {c_otp_count} OTP", callback_data=f"tr_cnt_{sid}_{c_code}")])
-        
-        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="tr_main")])
-        markup = InlineKeyboardMarkup(keyboard)
-        try: await query.edit_message_text(f"👑 <b>Explore Service:</b> 🌐 {sid}\n\nSelect a country:", reply_markup=markup, parse_mode="HTML")
-        except: pass
+        elif data.startswith("tr_svc_"):
+            await query.answer()
+            sid = data.replace("tr_svc_", "")
+            service_data, _ = await fetch_live_traffic_detailed()
+            if sid not in service_data:
+                await query.answer("⚠️ No data available!", show_alert=True)
+                return
+            
+            countries = service_data[sid]
+            keyboard = []
+            for c_code, c_info in sorted(countries.items(), key=lambda x: sum(x[1]["ranges"].values()), reverse=True):
+                c_otp_count = sum(c_info["ranges"].values())
+                keyboard.append([InlineKeyboardButton(f"{c_info['flag']} {c_info['name']} ({c_code}) - {c_otp_count} OTP", callback_data=f"tr_cnt_{sid}_{c_code}")])
+            
+            keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="tr_main")])
+            markup = InlineKeyboardMarkup(keyboard)
+            try: await query.edit_message_text(f"👑 <b>Explore Service:</b> 🌐 {sid}\n\nSelect a country:", reply_markup=markup, parse_mode="HTML")
+            except: pass
 
-    elif data.startswith("tr_cnt_"):
-        await query.answer()
-        parts = data.split("_")
-        sid = parts[2]
-        c_code = parts[3]
-        service_data, _ = await fetch_live_traffic_detailed()
-        if sid not in service_data or c_code not in service_data[sid]: return
-        
-        c_data = service_data[sid][c_code]
-        ranges = c_data["ranges"]
-        
-        keyboard = []
-        row = []
-        for r_num, count in sorted(ranges.items(), key=lambda x: x[1], reverse=True):
-            row.append(InlineKeyboardButton(f"🎛 {r_num} ({count})", copy_text=CopyTextButton(text=r_num)))
-            if len(row) == 2:
-                keyboard.append(row)
-                row = []
-        if row: keyboard.append(row)
-        
-        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data=f"tr_svc_{sid}")])
-        markup = InlineKeyboardMarkup(keyboard)
-        try:
-            await query.edit_message_text(f"👑 <b>Ranges for</b> 🌐 {sid} - {c_data['flag']} <b>{c_code}</b>\n\nClick range to copy:", reply_markup=markup, parse_mode="HTML")
-        except: pass
+        elif data.startswith("tr_cnt_"):
+            await query.answer()
+            parts = data.split("_")
+            sid = parts[2]
+            c_code = parts[3]
+            service_data, _ = await fetch_live_traffic_detailed()
+            if sid not in service_data or c_code not in service_data[sid]: return
+            
+            c_data = service_data[sid][c_code]
+            ranges = c_data["ranges"]
+            
+            keyboard = []
+            row = []
+            for r_num, count in sorted(ranges.items(), key=lambda x: x[1], reverse=True):
+                row.append(InlineKeyboardButton(f"🎛 {r_num} ({count})", copy_text=CopyTextButton(text=r_num)))
+                if len(row) == 2:
+                    keyboard.append(row)
+                    row = []
+            if row: keyboard.append(row)
+            
+            keyboard.append([InlineKeyboardButton("🔙 Back", callback_data=f"tr_svc_{sid}")])
+            markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await query.edit_message_text(f"👑 <b>Ranges for</b> 🌐 {sid} - {c_data['flag']} <b>{c_code}</b>\n\nClick range to copy:", reply_markup=markup, parse_mode="HTML")
+            except: pass
 
-    elif data == "tr_main" or data == "tr_refresh":
-        await query.answer("🔄 Refreshed!")
-        service_data, total_hits = await fetch_live_traffic_detailed()
-        keyboard = []
-        for sid in sorted(service_data.keys()):
-            total_sid_otp = sum(sum(c_info["ranges"].values()) for c_info in service_data[sid].values())
-            keyboard.append([InlineKeyboardButton(f"👀 Explore {sid.title()} Range ({total_sid_otp})", callback_data=f"tr_svc_{sid}")])
-        keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data="tr_refresh"), InlineKeyboardButton("❌ Close", callback_data="tr_close")])
-        markup = InlineKeyboardMarkup(keyboard)
-        try: await query.edit_message_text(f"📊 <b>Live Traffic Panel</b>\n📋 <b>Total OTP:</b> {total_hits}\nSelect a service:", reply_markup=markup, parse_mode="HTML")
-        except: pass
+        elif data == "tr_main" or data == "tr_refresh":
+            await query.answer("🔄 Refreshed!")
+            service_data, total_hits = await fetch_live_traffic_detailed()
+            keyboard = []
+            for sid in sorted(service_data.keys()):
+                total_sid_otp = sum(sum(c_info["ranges"].values()) for c_info in service_data[sid].values())
+                keyboard.append([InlineKeyboardButton(f"👀 Explore {sid.title()} Range ({total_sid_otp})", callback_data=f"tr_svc_{sid}")])
+            keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data="tr_refresh"), InlineKeyboardButton("❌ Close", callback_data="tr_close")])
+            markup = InlineKeyboardMarkup(keyboard)
+            try: await query.edit_message_text(f"📊 <b>Live Traffic Panel</b>\n📋 <b>Total OTP:</b> {total_hits}\nSelect a service:", reply_markup=markup, parse_mode="HTML")
+            except: pass
 
-    elif data == "tr_close":
-        try: await query.message.delete()
-        except: pass
+        elif data == "tr_close":
+            try: await query.message.delete()
+            except: pass
 
-    elif data == "set_bkash":
-        USER_STATES[user_id] = "WAITING_FOR_BKASH"
-        await query.message.reply_text("📲 Please send your bKash number:")
-    elif data == "set_binance":
-        USER_STATES[user_id] = "WAITING_FOR_BINANCE"
-        await query.message.reply_text("🔴 Please send your Binance ID:")
-    elif data == "withdraw_menu":
-        user_bal = USER_BALANCES.get(user_id, 0.0)
-        if user_bal < 1.0:
-            await query.message.reply_text(f"❌ Minimum withdraw is $1.00. Current: ${user_bal:.5f}")
-        else:
-            await query.message.reply_text("✅ Withdraw request submitted successfully.")
-            USER_BALANCES[user_id] = 0.0
+        elif data == "set_bkash":
+            USER_STATES[user_id] = "WAITING_FOR_BKASH"
+            await query.message.reply_text("📲 Please send your bKash number:")
+        elif data == "set_binance":
+            USER_STATES[user_id] = "WAITING_FOR_BINANCE"
+            await query.message.reply_text("🔴 Please send your Binance ID:")
+        elif data == "withdraw_menu":
+            user_bal = USER_BALANCES.get(user_id, 0.0)
+            if user_bal < 1.0:
+                await query.message.reply_text(f"❌ Minimum withdraw is $1.00. Current: ${user_bal:.5f}")
+            else:
+                await query.message.reply_text("✅ Withdraw request submitted successfully.")
+                USER_BALANCES[user_id] = 0.0
+    except Exception as e:
+        print(f"Callback Error: {e}")
 
 async def post_init(application):
     application.create_task(auto_forward_console_logs(application))
