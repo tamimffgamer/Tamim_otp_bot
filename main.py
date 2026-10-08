@@ -2,7 +2,6 @@ import os
 import asyncio
 import requests
 import re
-import time
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, CopyTextButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
@@ -28,16 +27,16 @@ def get_country_info(phone_number, api_country=""):
         if "madagascar" in c_lower: return "Madagascar", "MG", "🇲🇬"
         elif "ivory" in c_lower or "côte" in c_lower: return "Ivory Coast", "CI", "🇨🇮"
         elif "cameroon" in c_lower: return "Cameroon", "CM", "🇨🇲"
-        elif "togo" in c_lower: return "Togo", "TG", "TG"
+        elif "togo" in c_lower: return "Togo", "TG", "🇹🇬"
         elif "benin" in c_lower: return "Benin", "BJ", "🇧🇯"
         elif "tanzania" in c_lower: return "Tanzania", "TZ", "🇹🇿"
         elif "ukraine" in c_lower: return "Ukraine", "UA", "🇺🇦"
-        elif "kyrgyzstan" in c_lower: return "Kyrgyzstan", "KG", "KG"
+        elif "kyrgyzstan" in c_lower: return "Kyrgyzstan", "KG", "🇰🇬"
     
     if clean_num.startswith("880"): return "Bangladesh", "BD", "🇧🇩"
     elif clean_num.startswith("237"): return "Cameroon", "CM", "🇨🇲"
     elif clean_num.startswith("225"): return "Ivory Coast", "CI", "🇨🇮"
-    elif clean_num.startswith("228"): return "Togo", "TG", "TG"
+    elif clean_num.startswith("228"): return "Togo", "TG", "🇹🇬"
     elif clean_num.startswith("261"): return "Madagascar", "MG", "🇲🇬"
     else: return "International", "INT", "🌍"
 
@@ -70,14 +69,24 @@ def _sync_check_number_sms(phone_number):
     try:
         res = requests.get(f"{BASE_API_URL}/check.php?api_key={MINO_API_KEY}&number={clean_num}", headers=headers, timeout=4.0)
         if res.status_code == 200:
-            res_json = res.json()
-            return res_json
+            return res.json()
     except Exception as e:
         print(f"Check SMS API Error: {e}")
     return None
 
 async def check_number_sms(phone_number):
     return await asyncio.to_thread(_sync_check_number_sms, phone_number)
+
+def _sync_success_otp(phone_number):
+    headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
+    clean_num = str(phone_number).strip()
+    try:
+        requests.get(f"{BASE_API_URL}/success_otp.php?api_key={MINO_API_KEY}&number={clean_num}", headers=headers, timeout=3.0)
+    except:
+        pass
+
+async def success_otp(phone_number):
+    await asyncio.to_thread(_sync_success_otp, phone_number)
 
 def _sync_fetch_live_traffic_detailed():
     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
@@ -175,10 +184,11 @@ async def auto_forward_console_logs(application):
                                     text=personal_text, 
                                     parse_mode="HTML"
                                 )
+                                await success_otp(u_phone)
                             except Exception as per_ex:
                                 print(f"Personal Send Error: {per_ex}")
 
-            # Also pull global console for public OTP group
+            # Public group broadcast
             headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
             res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=5.0)
             if res.status_code == 200:
