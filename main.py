@@ -79,12 +79,12 @@ def check_number_status_sync(phone_number):
 async def check_number_status(phone_number):
     return await asyncio.to_thread(check_number_status_sync, phone_number)
 
-async def auto_forward_console_logs(application):
-    print("Dedicated Per-Number Check Loop Started Successfully!")
+# ১. পার্সোনাল চ্যাটের জন্য ব্যাকগ্রাউন্ড লুপ (/check.php)
+async def personal_otp_checker(application):
+    print("Personal OTP Checker Loop Started!")
     while True:
         try:
             current_time = time.time()
-            
             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                 u_phone = str(u_info.get("phone", "")).strip()
                 fetch_time = u_info.get("fetch_time", 0)
@@ -98,12 +98,10 @@ async def auto_forward_console_logs(application):
                 if not res_data: continue
 
                 sms_data = res_data.get("data") or res_data.get("sms") or res_data.get("message") or res_data
-                
                 msg_text = ""
                 if isinstance(sms_data, dict):
                     actual_sms = sms_data.get("full_sms") or sms_data.get("message") or sms_data.get("text") or ""
                     explicit_otp = sms_data.get("otp_code") or ""
-                    
                     if explicit_otp and str(explicit_otp).strip():
                         msg_text = f"OTP: {explicit_otp}"
                     elif actual_sms and str(actual_sms).strip():
@@ -137,7 +135,6 @@ async def auto_forward_console_logs(application):
                     USER_BALANCES[user_id] = current_bal + 0.00122
 
                     country_name, _, flag = get_country_info(u_phone)
-                    
                     personal_text = (
                         f"🟢 <b>SUCCESSFUL OTP RECEIVED</b>\n\n"
                         f"🌐 <b>Service :</b> SMS\n"
@@ -161,33 +158,69 @@ async def auto_forward_console_logs(application):
                         await success_otp(u_phone)
                     except Exception as per_ex:
                         print(f"Personal Send Error: {per_ex}")
-
-                    print(f"DEBUG: Trying to send OTP to Group ID: {OTP_GROUP_CHAT_ID}")
-                    group_text = (
-                        f"🟢 <b>SMS OTP RECEIVED</b>\n\n"
-                        f"🌍 <b>Country :</b> {country_name} ({flag})\n"
-                        f"🎯 <b>Number :</b> <code>{u_phone}</code>\n"
-                        f"🔑 <b>Code :</b> <code>{otp_code}</code>\n\n"
-                        f"✉ <b>Message :</b>\n<code>{s_s}</code>"
-                    )
-                    group_markup = InlineKeyboardMarkup([
-                        [InlineKeyboardButton(text=f"📋 Copy OTP: {otp_code}", copy_text=CopyTextButton(text=otp_code))],
-                        [InlineKeyboardButton("NUMBER BOT ↗", url=f"https://t.me/{application.bot.username}")]
-                    ])
-                    try:
-                        await application.bot.send_message(
-                            chat_id=OTP_GROUP_CHAT_ID, 
-                            text=group_text, 
-                            reply_markup=group_markup, 
-                            parse_mode="HTML"
-                        )
-                        print("DEBUG: Group OTP sent successfully!")
-                    except Exception as g_ex:
-                        print(f"❌ DEBUG Group Send Error: {g_ex}")
-
         except Exception as e:
-            print(f"Background Loop Error: {e}")
-        
+            print(f"Personal Loop Error: {e}")
+        await asyncio.sleep(2)
+
+# ২. ওটিপি গ্রুপের জন্য ব্যাকগ্রাউন্ড লুপ (/console.php)
+async def group_otp_streamer(application):
+    print("Group OTP Streamer Loop Started!")
+    while True:
+        try:
+            headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
+            res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=6.0)
+            if res.status_code == 200:
+                res_json = res.json()
+                hits = res_json.get("data", [])
+                if isinstance(hits, list):
+                    for hit in hits:
+                        if not isinstance(hit, dict): continue
+                        msg = hit.get("message") or hit.get("text") or hit.get("sms") or hit.get("content") or hit.get("msg") or ""
+                        num = str(hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("range", "")).strip()
+                        service = hit.get("service", "SMS")
+                        country = hit.get("country", "International")
+
+                        if not msg: continue
+                        s_msg = str(msg).strip()
+                        if s_msg.lower() in ["success", "completed", "waiting", "failed", "ok", "active"]:
+                            continue
+
+                        g_id = f"grp_{num}_{s_msg}_{time.time()}"
+                        if g_id in SEEN_OTP_IDS: continue
+                        SEEN_OTP_IDS.add(g_id)
+                        if len(SEEN_OTP_IDS) > 500: SEEN_OTP_IDS.clear()
+
+                        matches = re.findall(r'\b\d{4,8}\b', s_msg)
+                        otp_code = None
+                        for m in matches:
+                            if not m.startswith("202") and not m.startswith("201"):
+                                otp_code = m
+                                break
+                        if not otp_code: continue
+
+                        _, _, flag = get_country_info(num, country)
+                        group_text = (
+                            f"🟢 <b>{service} OTP RECEIVED</b>\n\n"
+                            f"🌍 <b>Country :</b> {country} ({flag})\n"
+                            f"🎯 <b>Number :</b> <code>{num}</code>\n"
+                            f"🔑 <b>Code :</b> <code>{otp_code}</code>\n\n"
+                            f"✉ <b>Message :</b>\n<code>{s_msg}</code>"
+                        )
+                        group_markup = InlineKeyboardMarkup([
+                            [InlineKeyboardButton(text=f"📋 Copy OTP: {otp_code}", copy_text=CopyTextButton(text=otp_code))],
+                            [InlineKeyboardButton("NUMBER BOT ↗", url=f"https://t.me/{application.bot.username}")]
+                        ])
+                        try:
+                            await application.bot.send_message(
+                                chat_id=OTP_GROUP_CHAT_ID, 
+                                text=group_text, 
+                                reply_markup=group_markup, 
+                                parse_mode="HTML"
+                            )
+                        except Exception as g_ex:
+                            print(f"Group Send Error: {g_ex}")
+        except Exception as e:
+            print(f"Group Loop Error: {e}")
         await asyncio.sleep(2)
 
 def create_single_number_markup(phone_num):
@@ -353,7 +386,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"Callback Error: {e}")
 
 async def post_init(application):
-    application.create_task(auto_forward_console_logs(application))
+    application.create_task(personal_otp_checker(application))
+    application.create_task(group_otp_streamer(application))
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
