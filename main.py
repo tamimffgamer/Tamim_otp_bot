@@ -137,6 +137,7 @@ async def auto_forward_console_logs(application):
 
                     country_name, _, flag = get_country_info(u_phone)
                     
+                    # ব্যক্তিগত চ্যাটে পাঠানোর মেসেজ
                     personal_text = (
                         f"🟢 <b>SUCCESSFUL OTP RECEIVED</b>\n\n"
                         f"🌐 <b>Service :</b> SMS\n"
@@ -160,6 +161,28 @@ async def auto_forward_console_logs(application):
                         await success_otp(u_phone)
                     except Exception as per_ex:
                         print(f"Personal Send Error: {per_ex}")
+
+                    # 📣 ওটিপি গ্রুপে পাঠানোর মেসেজ (এখানে যুক্ত করা হয়েছে)
+                    group_text = (
+                        f"🟢 <b>SMS OTP RECEIVED</b>\n\n"
+                        f"🌍 <b>Country :</b> {country_name} ({flag})\n"
+                        f"🎯 <b>Number :</b> <code>{u_phone}</code>\n"
+                        f"🔑 <b>Code :</b> <code>{otp_code}</code>\n\n"
+                        f"✉ <b>Message :</b>\n<code>{s_s}</code>"
+                    )
+                    group_markup = InlineKeyboardMarkup([
+                        [InlineKeyboardButton(text=f"📋 Copy OTP: {otp_code}", copy_text=CopyTextButton(text=otp_code))],
+                        [InlineKeyboardButton("NUMBER BOT ↗", url=f"https://t.me/{application.bot.username}")]
+                    ])
+                    try:
+                        await application.bot.send_message(
+                            chat_id=OTP_GROUP_CHAT_ID, 
+                            text=group_text, 
+                            reply_markup=group_markup, 
+                            parse_mode="HTML"
+                        )
+                    except Exception as g_ex:
+                        print(f"Group Send Error: {g_ex}")
 
         except Exception as e:
             print(f"Background Loop Error: {e}")
