@@ -313,7 +313,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif "Live Traffic" in text or "TRAFFIC" in text:
             USER_STATES[user_id] = None
-            await update.message.reply_text("📊 Live traffic panel is active.", parse_mode="HTML")
+            wait_msg = await update.message.reply_text("⏳ Fetching live active service ranges from MINO panel...")
+            
+            headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
+            try:
+                res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=8.0)
+                try: await wait_msg.delete()
+                except: pass
+
+                if res.status_code == 200:
+                    res_json = res.json()
+                    hits = res_json.get("data", [])
+                    
+                    services_map = {}
+                    if isinstance(hits, list):
+                        for hit in hits:
+                            if not isinstance(hit, dict): continue
+                            srv = hit.get("service") or hit.get("name") or hit.get("app") or "SMS"
+                            num = hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("range") or ""
+                            if srv not in services_map:
+                                services_map[srv] = set()
+                            if num:
+                                services_map[srv].add(str(num))
+
+                    if services_map:
+                        traffic_text = "📊 <b>LIVE ACTIVE SERVICE RANGES</b>\n\n"
+                        for srv, nums in services_map.items():
+                            count = len(nums) if nums else 1
+                            traffic_text = traffic_text + f"🔹 <b>{srv}</b> : <code>{count} Ranges</code>\n"
+                        
+                        traffic_markup = InlineKeyboardMarkup([
+                            [InlineKeyboardButton("🔄 Refresh Traffic", callback_data="refresh_traffic")],
+                            [InlineKeyboardButton("🔙 Back", callback_data="back_home")]
+                        ])
+                        await update.message.reply_text(traffic_text, reply_markup=traffic_markup, parse_mode="HTML")
+                    else:
+                        await update.message.reply_text("⚠️ No active traffic ranges found right now.")
+                else:
+                    await update.message.reply_text("❌ Failed to fetch live traffic from panel.")
+            except Exception as e:
+                try: await wait_msg.delete()
+                except: pass
+                await update.message.reply_text(f"❌ Error fetching live traffic: {e}")
 
         elif "Balance" in text:
             USER_STATES[user_id] = None
@@ -342,6 +383,44 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try: await query.message.delete()
             except: pass
             await start(update, context)
+
+        elif data == "refresh_traffic":
+            await query.answer("🔄 Refreshing traffic...")
+            headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
+            try:
+                res = await asyncio.to_thread(requests.get, f"{BASE_API_URL}/console.php", headers=headers, timeout=8.0)
+                if res.status_code == 200:
+                    res_json = res.json()
+                    hits = res_json.get("data", [])
+                    services_map = {}
+                    if isinstance(hits, list):
+                        for hit in hits:
+                            if not isinstance(hit, dict): continue
+                            srv = hit.get("service") or hit.get("name") or hit.get("app") or "SMS"
+                            num = hit.get("number") or hit.get("full_number") or hit.get("phone") or hit.get("range") or ""
+                            if srv not in services_map:
+                                services_map[srv] = set()
+                            if num:
+                                services_map[srv].add(str(num))
+                    
+                    if services_map:
+                        traffic_text = "📊 <b>LIVE ACTIVE SERVICE RANGES</b>\n\n"
+                        for srv, nums in services_map.items():
+                            count = len(nums) if nums else 1
+                            traffic_text = traffic_text + f"🔹 <b>{srv}</b> : <code>{count} Ranges</code>\n"
+                        
+                        traffic_markup = InlineKeyboardMarkup([
+                            [InlineKeyboardButton("🔄 Refresh Traffic", callback_data="refresh_traffic")],
+                            [InlineKeyboardButton("🔙 Back", callback_data="back_home")]
+                        ])
+                        try:
+                            await query.edit_message_text(traffic_text, reply_markup=traffic_markup, parse_mode="HTML")
+                        except:
+                            await query.message.reply_text(traffic_text, reply_markup=traffic_markup, parse_mode="HTML")
+                    else:
+                        await query.answer("⚠️ No active traffic ranges found.", show_alert=True)
+            except Exception as e:
+                await query.answer(f"❌ Error: {e}", show_alert=True)
 
         elif data == "change_number":
             await query.answer("🔄 Fetching new number...")
