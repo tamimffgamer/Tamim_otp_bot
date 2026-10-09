@@ -162,6 +162,7 @@ async def auto_forward_console_logs(application):
                     except Exception as per_ex:
                         print(f"Personal Send Error: {per_ex}")
 
+                    print(f"DEBUG: Trying to send OTP to Group ID: {OTP_GROUP_CHAT_ID}")
                     group_text = (
                         f"🟢 <b>SMS OTP RECEIVED</b>\n\n"
                         f"🌍 <b>Country :</b> {country_name} ({flag})\n"
@@ -180,8 +181,9 @@ async def auto_forward_console_logs(application):
                             reply_markup=group_markup, 
                             parse_mode="HTML"
                         )
+                        print("DEBUG: Group OTP sent successfully!")
                     except Exception as g_ex:
-                        print(f"Group Send Error: {g_ex}")
+                        print(f"❌ DEBUG Group Send Error: {g_ex}")
 
         except Exception as e:
             print(f"Background Loop Error: {e}")
