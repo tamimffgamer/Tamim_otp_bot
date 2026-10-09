@@ -64,7 +64,6 @@ def success_otp_sync(phone_number):
 async def success_otp(phone_number):
     await asyncio.to_thread(success_otp_sync, phone_number)
 
-# নির্দিষ্ট নাম্বারের জন্য চেক করার ফাংশন (/check.php)
 def check_number_status_sync(phone_number):
     headers = {"mauthapi": MINO_API_KEY, "Accept": "application/json"}
     clean_num = str(phone_number).strip().replace("+", "")
@@ -86,45 +85,49 @@ async def auto_forward_console_logs(application):
         try:
             current_time = time.time()
             
-            # বর্তমানে যেসব ইউজার নাম্বার নিয়ে লাইভ আছেন তাদের চেক করা
             for user_id, u_info in list(ACTIVE_USER_NUMBERS.items()):
                 u_phone = str(u_info.get("phone", "")).strip()
                 fetch_time = u_info.get("fetch_time", 0)
                 
-                # ২০ মিনিট (১২০০ সেকেন্ড) পার হয়ে গেলে এই নাম্বার লিস্ট থেকে বাদ
                 if (current_time - fetch_time) > 1200:
                     continue
 
                 if not u_phone: continue
 
-                # সরাসরি ঐ নাম্বারের জন্য প্যানেলে চেক রিকোয়েস্ট পাঠানো
                 res_data = await check_number_status(u_phone)
                 if not res_data: continue
 
-                # প্যানেলের রেসপন্স থেকে মেসেজ বা এসএমএস খুঁজে বের করা
-                # (মাইনো এপিআই রেসপন্সের স্ট্রাকচার অনুযায়ী ডাটা এক্সট্রাক্ট করা হচ্ছে)
                 sms_data = res_data.get("data") or res_data.get("sms") or res_data.get("message") or res_data
                 
                 msg_text = ""
                 if isinstance(sms_data, dict):
-                    msg_text = sms_data.get("message") or sms_data.get("text") or sms_data.get("sms") or sms_data.get("content") or str(sms_data)
+                    actual_sms = sms_data.get("full_sms") or sms_data.get("message") or sms_data.get("text") or ""
+                    explicit_otp = sms_data.get("otp_code") or ""
+                    
+                    if explicit_otp and str(explicit_otp).strip():
+                        msg_text = f"OTP: {explicit_otp}"
+                    elif actual_sms and str(actual_sms).strip():
+                        msg_text = actual_sms
+                    else:
+                        continue
                 elif isinstance(sms_data, str):
                     msg_text = sms_data
 
                 if not msg_text:
-                    # যদি সরাসরি রুট লেভেলে মেসেজ থাকে
                     msg_text = res_data.get("message") or res_data.get("text") or ""
 
-                if not msg_text: continue
-                
-                # যদি মেসেজটি স্ট্যাটাস রিলেটেড বা ফাঁকা হয়
-                if str(msg_text).lower().strip() in ["success", "completed", "waiting", "failed", "ok"]:
+                if not (s_s := str(msg_text).strip()): continue
+                if s_s.lower() in ["success", "completed", "waiting", "failed", "ok", "active"]:
                     continue
 
-                # ওটিপি কোড এক্সট্রাক্ট করা (৪ থেকে ৮ ডিজিট)
-                match_otp = re.search(r'\b\d{4,8}\b', str(msg_text))
-                if not match_otp: continue
-                otp_code = match_otp.group(0)
+                matches = re.findall(r'\b\d{4,8}\b', s_s)
+                otp_code = None
+                for m in matches:
+                    if not m.startswith("202") and not m.startswith("201"):
+                        otp_code = m
+                        break
+                
+                if not otp_code: continue
 
                 sent_set = u_info.setdefault("sent_otps", set())
                 if otp_code not in sent_set:
@@ -140,7 +143,7 @@ async def auto_forward_console_logs(application):
                         f"🌍 <b>Country :</b> {country_name} ({flag})\n"
                         f"🎯 <b>Number :</b> <code>{u_phone}</code>\n"
                         f"🔑 <b>OTP Code :</b> <code>{otp_code}</code>\n\n"
-                        f"✉ <b>Full Message :</b>\n<code>{msg_text}</code>\n\n"
+                        f"✉ <b>Full Message :</b>\n<code>{s_s}</code>\n\n"
                         f"💰 <b>Earned :</b> +$0.00122"
                     )
                     personal_markup = InlineKeyboardMarkup([
@@ -255,7 +258,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif "Live Traffic" in text or "TRAFFIC" in text:
             USER_STATES[user_id] = None
-            # Live traffic logic placeholder
             await update.message.reply_text("📊 Live traffic panel is active.", parse_mode="HTML")
 
         elif "Balance" in text:
