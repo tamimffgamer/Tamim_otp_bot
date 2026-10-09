@@ -79,7 +79,6 @@ def check_number_status_sync(phone_number):
 async def check_number_status(phone_number):
     return await asyncio.to_thread(check_number_status_sync, phone_number)
 
-# ১. পার্সোনাল চ্যাটের জন্য ব্যাকগ্রাউন্ড লুপ (/check.php)
 async def personal_otp_checker(application):
     print("Personal OTP Checker Loop Started!")
     while True:
@@ -162,7 +161,6 @@ async def personal_otp_checker(application):
             print(f"Personal Loop Error: {e}")
         await asyncio.sleep(2)
 
-# ২. ওটিপি গ্রুপের জন্য ব্যাকগ্রাউন্ড লুপ (/console.php)
 async def group_otp_streamer(application):
     print("Group OTP Streamer Loop Started!")
     while True:
@@ -305,7 +303,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
 
             country_name, _, flag = get_country_info(phone)
-            header_text = f"✅ <b>Number:</b> {flag} {country_name}\n\nএই নাম্বারে কোড পাঠান। এটি পরবর্তী **২০ মিনিট** পর্যন্ত সক্রিয় থাকবে এবং এই সময়ের মধ্যে আসা সঠিক কোডটিই কেবল এখানে পাঠানো হবে!"
+            header_text = f"✅ <b>Number:</b> {flag} {country_name}"
             reply_markup = create_single_number_markup(phone)
             await update.message.reply_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
 
@@ -362,7 +360,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
 
             country_name, _, flag = get_country_info(phone)
-            header_text = f"✅ <b>New Number:</b> {flag} {country_name}\n\nনতুন নাম্বারের ২০ মিনিটের সময়সীমা শুরু হয়েছে!"
+            header_text = f"✅ <b>New Number:</b> {flag} {country_name}"
             reply_markup = create_single_number_markup(phone)
             try:
                 await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode="HTML")
